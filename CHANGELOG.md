@@ -23,3 +23,10 @@
 - Added TargetService reset during startup and before global Owner shutdown in STOP ALL.
 - Kept Dynamic Walk nearest-target selection, 25-stud range, and 0.25-second attack cooldown unchanged.
 - Added structural regression guards in `static-check.sh`. Static checks are not a Luau parser or live Delta runtime test.
+
+
+## Phase 18.4 regression fix
+- Corrected the `warp_mode` unlock guard to accept a Death Note-owned target, matching the WARP activation call site.
+- Kept `warp_off` and `movement_owner_switch` restricted to WARP-owned targets.
+- Added static regression assertions for the WARP activation and unlock ownership contract.
+- Live Delta testing is still required for target handoff and StopAll behavior.
