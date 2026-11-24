@@ -1,0 +1,60 @@
+diff --git a/main.lua b/main.lua
+--- a/main.lua
++++ b/main.lua
+@@ WARP / MONSTER mutual exclusion @@
+-            if previous == "MONSTER" or previous == "CONFLICT" or states.MonsterWarp then
++            if previous == "MONSTER" or previous == "CONFLICT" or states.MonsterWarp then
+                 if type(stopMonsterWarp) == "function" then
+                     stopMonsterWarp(true)
+                 elseif type(_G.TAYJAY_MONSTER_STOP) == "function" then
+                     _G.TAYJAY_MONSTER_STOP()
+                 else
+                     return false
+                 end
+             end
++            -- Handoff invariant: PLAYER_WARP may become ON only after MONSTER is OFF.
++            if states.MonsterWarp then return false end
+             return states.MonsterWarp ~= true
+         end)
+     end
+@@
+     trackConnection(kaCircleBtn.Activated:Connect(function()
+         local turningOn = not states.KillAura
+         if turningOn and not claimPlayerMovement() then return end
+-        states.KillAura = not states.KillAura
++        states.KillAura = turningOn
+         if states.KillAura then
++            -- WARP and MONSTER are mutually exclusive at the canonical state layer.
++            states.MonsterWarp = false
+             states.NormalKillAura = false
+@@
+     local function startMonsterWarp()
+@@
+         local movementReady = _tjMovementController
+             and _tjMovementController:Acquire("MONSTER", function(previous)
+@@
+                     return _G.TAYJAY_WARP_STOP_NOW(true) == true
+                 end
+                 return true
+             end)
+@@
+             return
+         end
++        -- Handoff invariant: MONSTER may become ON only after every PLAYER_WARP mode is OFF.
++        if states.KillAura or states.DNWarp or states.AutoWarp then
++            monsterWarpStarting = false
++            if _tjMovementController then _tjMovementController:Release("MONSTER") end
++            setMonsterPanelStatus("👾 MONSTER WARP: WAIT", "WARP ยังปิดไม่สมบูรณ์ • ไม่เปิด MONSTER ซ้อน", 0, 1)
++            return
++        end
+         local character = LocalPlayer.Character
+@@
+         states.MonsterWarp = true
+@@
+     local function toggleMonsterMode(mode)
+@@
+         else
+             setMonsterFilter(mode)
+             startMonsterWarp()
+         end
+     end
