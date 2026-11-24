@@ -1,14 +1,7 @@
 diff --git a/main.lua b/main.lua
 --- a/main.lua
 +++ b/main.lua
-@@ WARP / MONSTER mutual exclusion @@
--            if previous == "MONSTER" or previous == "CONFLICT" or states.MonsterWarp then
-+            if previous == "MONSTER" or previous == "CONFLICT" or states.MonsterWarp then
-                 if type(stopMonsterWarp) == "function" then
-                     stopMonsterWarp(true)
-                 elseif type(_G.TAYJAY_MONSTER_STOP) == "function" then
-                     _G.TAYJAY_MONSTER_STOP()
-                 else
+@@ -2305,14 +2305,18 @@ do
                      return false
                  end
              end
@@ -17,7 +10,6 @@ diff --git a/main.lua b/main.lua
              return states.MonsterWarp ~= true
          end)
      end
-@@
      trackConnection(kaCircleBtn.Activated:Connect(function()
          local turningOn = not states.KillAura
          if turningOn and not claimPlayerMovement() then return end
@@ -27,17 +19,10 @@ diff --git a/main.lua b/main.lua
 +            -- WARP and MONSTER are mutually exclusive at the canonical state layer.
 +            states.MonsterWarp = false
              states.NormalKillAura = false
-@@
-     local function startMonsterWarp()
-@@
-         local movementReady = _tjMovementController
-             and _tjMovementController:Acquire("MONSTER", function(previous)
-@@
-                     return _G.TAYJAY_WARP_STOP_NOW(true) == true
-                 end
-                 return true
-             end)
-@@
+             if type(TargetService) == "table" and TargetService.Source == "deathnote" then
+                 TargetService:Unlock("warp_mode")
+@@ -4032,6 +4036,13 @@ local okMonster, errMonster = pcall(function()
+             setMonsterPanelStatus("👾 MONSTER WARP: WAIT", "ยังยึดสิทธิ์ WARP อยู่ • ไม่เริ่มซ้อนระบบ", 0, 1)
              return
          end
 +        -- Handoff invariant: MONSTER may become ON only after every PLAYER_WARP mode is OFF.
@@ -48,13 +33,5 @@ diff --git a/main.lua b/main.lua
 +            return
 +        end
          local character = LocalPlayer.Character
-@@
-         states.MonsterWarp = true
-@@
-     local function toggleMonsterMode(mode)
-@@
-         else
-             setMonsterFilter(mode)
-             startMonsterWarp()
-         end
-     end
+         local root = character and character:FindFirstChild("HumanoidRootPart")
+         local humanoid = character and character:FindFirstChildOfClass("Humanoid")
