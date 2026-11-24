@@ -1,4 +1,4 @@
-name: NEWTJ Static Check
+name: NEWTJ Validation Gate
 
 on:
   push:
@@ -7,11 +7,61 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
-  structural-check:
+  validate-main:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Run structural checks
+
+      - name: Phase 1 - source integrity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f main.lua
+          bytes=$(wc -c < main.lua)
+          lines=$(wc -l < main.lua)
+          sha1=$(sha1sum main.lua | awk '{print $1}')
+          echo "main.lua bytes=$bytes lines=$lines sha1=$sha1"
+          test "$bytes" -ge 300000
+          test "$lines" -ge 6000
+          ! grep -qF 'main.lua recovery pending' main.lua
+
+      - name: Phase 2 - structural validation
         run: bash static-check.sh main.lua
+
+      - name: Phase 3 - architecture boundary smoke checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -qF 'TAYJAY RESOURCE MANAGER' main.lua
+          grep -qF 'TAYJAY TARGET SERVICE' main.lua
+          grep -qF 'TAYJAY MOVEMENT CONTROLLER' main.lua
+          grep -qF 'AUTO PLAYER ESP' main.lua
+          grep -qF 'MM2 ROLE ESP' main.lua
+          grep -qF 'TAYJAY FPS BOOSTER' main.lua
+          grep -qF '_G.TAYJAY_STOP_ALL = function()' main.lua
+
+      - name: Phase 4 - artifact guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          test -s main.lua
+
+      - name: Phase 5 - baseline report
+        shell: bash
+        run: |
+          {
+            echo '## NEWTJ Phase 1-5 baseline'
+            echo
+            echo "- main.lua blob: $(git rev-parse HEAD:main.lua)"
+            echo "- bytes: $(wc -c < main.lua)"
+            echo "- lines: $(wc -l < main.lua)"
+            echo "- sha1: $(sha1sum main.lua | awk '{print $1}')"
+            echo '- structural checks: executed'
+            echo '- architecture boundary smoke checks: executed'
+          } >> "$GITHUB_STEP_SUMMARY"
