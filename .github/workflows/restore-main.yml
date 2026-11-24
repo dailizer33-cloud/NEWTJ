@@ -1,0 +1,44 @@
+name: Restore main.lua
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Restore main.lua from known-good commit archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          git show 544876c41bf9b8bd4113f025ae5cf041f17f9f06:Newtj.zip > /tmp/Newtj.zip
+          python3 - <<'PY'
+          import zipfile
+          with zipfile.ZipFile('/tmp/Newtj.zip') as z:
+              data = z.read('Newtj/src/main.lua')
+          with open('main.lua', 'wb') as f:
+              f.write(data)
+          print('restored bytes:', len(data))
+          PY
+
+      - name: Commit restored main.lua
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add main.lua
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git commit -m "Restore main.lua from known-good archive"
+          git push origin HEAD:main
