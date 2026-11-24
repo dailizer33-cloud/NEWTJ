@@ -19,79 +19,81 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          path = Path('main.lua')
-          text = path.read_text(encoding='utf-8')
-          if 'local stepDt = since' in text and 'MONSTER_GLIDE_SPEED * stepDt' in text:
-              print('already patched')
+          path = Path("main.lua")
+          text = path.read_text(encoding="utf-8")
+          if "local stepDt = since" in text and "MONSTER_GLIDE_SPEED * stepDt" in text:
+              print("already patched")
               raise SystemExit(0)
-          old = '''    local function monsterSoftApply(myRoot, desiredCF, character, targetModel, dt, aerial)
-          local now = os.clock()
-          if now - monsterLastMoveAt < MONSTER_MOVE_COOLDOWN then
-             return false, "cooldown"
-          end
-          dt = tonumber(dt) or 0.016
-          if dt <= 0 then dt = 0.016 end
-          if dt > 0.1 then dt = 0.1 end -- avoid huge jumps after hitch
-          local current = myRoot.CFrame
-          local from = current.Position
-          local desiredPos = desiredCF.Position
-          local delta = desiredPos - from
-          local distance = delta.Magnitude
-          -- Phase physics fix: GLIDE_SPEED is real studs/sec cap before hop clamp
-          local maxStep = MONSTER_GLIDE_SPEED * dt
-'''
-          new = '''    local function monsterSoftApply(myRoot, desiredCF, character, targetModel, dt, aerial)
-          local now = os.clock()
-          local since = (monsterLastMoveAt > 0) and (now - monsterLastMoveAt) or 0
-          if since > 0 and since < MONSTER_MOVE_COOLDOWN then
-             return false, "cooldown"
-          end
-          -- Frame dt changes with FPS. Use time since the last write so 30/60/144 feel the same.
-          local frameDt = tonumber(dt) or (1 / 60)
-          if frameDt <= 0 then frameDt = 1 / 60 end
-          if frameDt > 0.1 then frameDt = 0.1 end
-          local stepDt = since
-          if stepDt <= 0 or stepDt > 0.1 then
-             stepDt = frameDt
-          end
-          local current = myRoot.CFrame
-          local from = current.Position
-          local desiredPos = desiredCF.Position
-          local delta = desiredPos - from
-          local distance = delta.Magnitude
-          -- GLIDE_SPEED is studs/sec. Scale by real elapsed time, not the raw frame dt.
-          local maxStep = MONSTER_GLIDE_SPEED * stepDt
-'''
+          old = (
+              "    local function monsterSoftApply(myRoot, desiredCF, character, targetModel, dt, aerial)\n"
+              "      local now = os.clock()\n"
+              "      if now - monsterLastMoveAt < MONSTER_MOVE_COOLDOWN then\n"
+              "         return false, \"cooldown\"\n"
+              "      end\n"
+              "      dt = tonumber(dt) or 0.016\n"
+              "      if dt <= 0 then dt = 0.016 end\n"
+              "      if dt > 0.1 then dt = 0.1 end -- avoid huge jumps after hitch\n"
+              "      local current = myRoot.CFrame\n"
+              "      local from = current.Position\n"
+              "      local desiredPos = desiredCF.Position\n"
+              "      local delta = desiredPos - from\n"
+              "      local distance = delta.Magnitude\n"
+              "      -- Phase physics fix: GLIDE_SPEED is real studs/sec cap before hop clamp\n"
+              "      local maxStep = MONSTER_GLIDE_SPEED * dt\n"
+          )
+          new = (
+              "    local function monsterSoftApply(myRoot, desiredCF, character, targetModel, dt, aerial)\n"
+              "      local now = os.clock()\n"
+              "      local since = (monsterLastMoveAt > 0) and (now - monsterLastMoveAt) or 0\n"
+              "      if since > 0 and since < MONSTER_MOVE_COOLDOWN then\n"
+              "         return false, \"cooldown\"\n"
+              "      end\n"
+              "      -- Frame dt changes with FPS. Use time since the last write so 30/60/144 feel the same.\n"
+              "      local frameDt = tonumber(dt) or (1 / 60)\n"
+              "      if frameDt <= 0 then frameDt = 1 / 60 end\n"
+              "      if frameDt > 0.1 then frameDt = 0.1 end\n"
+              "      local stepDt = since\n"
+              "      if stepDt <= 0 or stepDt > 0.1 then\n"
+              "         stepDt = frameDt\n"
+              "      end\n"
+              "      local current = myRoot.CFrame\n"
+              "      local from = current.Position\n"
+              "      local desiredPos = desiredCF.Position\n"
+              "      local delta = desiredPos - from\n"
+              "      local distance = delta.Magnitude\n"
+              "      -- GLIDE_SPEED is studs/sec. Scale by real elapsed time, not the raw frame dt.\n"
+              "      local maxStep = MONSTER_GLIDE_SPEED * stepDt\n"
+          )
           if old not in text:
-              raise SystemExit('header block not found')
+              raise SystemExit("header block not found")
           text = text.replace(old, new, 1)
-          old_a = '''      -- blend: softer overall, less aggressive when close (ลดกระตุก)
-          local farFactor = math.clamp(distance / 28, 0, 1)
-          local alphaH = math.clamp(MONSTER_HORIZONTAL_LERP + farFactor * 0.18, 0.12, 0.58)
-          local alphaV = aerial
-             and math.clamp(MONSTER_VERTICAL_LERP + 0.18, 0.18, 0.72)
-             or math.clamp(MONSTER_VERTICAL_LERP + farFactor * 0.08, 0.10, 0.55)
-'''
-          new_a = '''      -- ref* is the blend for one cooldown step. Convert with elapsed time so FPS does not change the feel.
-          local farFactor = math.clamp(distance / 28, 0, 1)
-          local refH = math.clamp(MONSTER_HORIZONTAL_LERP + farFactor * 0.18, 0.12, 0.58)
-          local refV = aerial
-             and math.clamp(MONSTER_VERTICAL_LERP + 0.18, 0.18, 0.72)
-             or math.clamp(MONSTER_VERTICAL_LERP + farFactor * 0.08, 0.10, 0.55)
-          local kH = -math.log(1 - refH) / MONSTER_MOVE_COOLDOWN
-          local kV = -math.log(1 - refV) / MONSTER_MOVE_COOLDOWN
-          local alphaH = math.clamp(1 - math.exp(-kH * stepDt), 0.02, 0.9)
-          local alphaV = math.clamp(1 - math.exp(-kV * stepDt), 0.02, 0.9)
-'''
+          old_a = (
+              "      -- blend: softer overall, less aggressive when close (ลดกระตุก)\n"
+              "      local farFactor = math.clamp(distance / 28, 0, 1)\n"
+              "      local alphaH = math.clamp(MONSTER_HORIZONTAL_LERP + farFactor * 0.18, 0.12, 0.58)\n"
+              "      local alphaV = aerial\n"
+              "         and math.clamp(MONSTER_VERTICAL_LERP + 0.18, 0.18, 0.72)\n"
+              "         or math.clamp(MONSTER_VERTICAL_LERP + farFactor * 0.08, 0.10, 0.55)\n"
+          )
+          new_a = (
+              "      -- ref* is the blend for one cooldown step. Scale by elapsed time so FPS does not change the feel.\n"
+              "      local farFactor = math.clamp(distance / 28, 0, 1)\n"
+              "      local refH = math.clamp(MONSTER_HORIZONTAL_LERP + farFactor * 0.18, 0.12, 0.58)\n"
+              "      local refV = aerial\n"
+              "         and math.clamp(MONSTER_VERTICAL_LERP + 0.18, 0.18, 0.72)\n"
+              "         or math.clamp(MONSTER_VERTICAL_LERP + farFactor * 0.08, 0.10, 0.55)\n"
+              "      local kH = -math.log(1 - refH) / MONSTER_MOVE_COOLDOWN\n"
+              "      local kV = -math.log(1 - refV) / MONSTER_MOVE_COOLDOWN\n"
+              "      local alphaH = math.clamp(1 - math.exp(-kH * stepDt), 0.02, 0.9)\n"
+              "      local alphaV = math.clamp(1 - math.exp(-kV * stepDt), 0.02, 0.9)\n"
+          )
           if old_a not in text:
-              raise SystemExit('alpha block not found')
+              raise SystemExit("alpha block not found")
           text = text.replace(old_a, new_a, 1)
-          if len(text.encode('utf-8')) < 300000:
-              raise SystemExit('file too small')
-          if 'MONSTER_GLIDE_SPEED * dt' in text.split('local function monsterSoftApply',1)[1].split('local function monsterGlueStep',1)[0]:
-              raise SystemExit('raw frame dt still used for glide inside soft apply')
-          path.write_text(text, encoding='utf-8')
-          print('patched', len(text.encode('utf-8')))
+          if len(text.encode("utf-8")) < 300000:
+              raise SystemExit("file too small")
+          path.write_text(text, encoding="utf-8")
+          print("patched", len(text.encode("utf-8")))
           PY
 
       - name: Commit and push
