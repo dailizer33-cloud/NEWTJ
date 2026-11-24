@@ -57,7 +57,8 @@ jobs:
           cp /tmp/main.lua.restored main.lua
           test "$(wc -c < main.lua)" -ge 300000
           test "$(wc -l < main.lua)" -ge 6000
-          git diff --check -- main.lua
+          ! grep -qF 'RECOVERY REQUIRED' main.lua
+          echo 'Legacy trailing whitespace is preserved during recovery; whitespace cleanup is a separate change.'
 
       - name: Commit recovery only
         shell: bash
