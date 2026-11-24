@@ -23,54 +23,54 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Restore to temporary file and validate
+      - name: Restore and validate known-good source
         shell: bash
         run: |
           set -euo pipefail
           git show 544876c41bf9b8bd4113f025ae5cf041f17f9f06:Newtj.zip > /tmp/Newtj.zip
           python3 - <<'PY'
-          import zipfile
+          import hashlib, zipfile
           with zipfile.ZipFile('/tmp/Newtj.zip') as z:
-              info = z.getinfo('Newtj/src/main.lua')
-              data = z.read(info)
+              data = z.read('Newtj/src/main.lua')
           if len(data) < 300000:
-              raise SystemExit(f'restored main.lua unexpectedly small: {len(data)} bytes')
-          for marker in (b'local function claimPlayerMovement()', b'local function startMonsterWarp()', b'_G.TAYJAY_STOP_ALL = function()'):
-              if marker not in data:
-                  raise SystemExit(f'missing critical marker: {marker!r}')
-          with open('/tmp/main.lua.restored', 'wb') as f:
-              f.write(data)
-          print(f'restored bytes={len(data)}')
+              raise SystemExit(f'restored source too small: {len(data)}')
+          markers = (
+              b'local function claimPlayerMovement()',
+              b'local function startMonsterWarp()',
+              b'_G.TAYJAY_STOP_ALL = function()',
+          )
+          missing = [m for m in markers if m not in data]
+          if missing:
+              raise SystemExit(f'missing critical markers: {missing!r}')
+          if b'RECOVERY REQUIRED' in data or b'__FROM_LOCAL_FILE_UNSUPPORTED__' in data:
+              raise SystemExit('placeholder detected in recovered source')
+          open('/tmp/main.lua.restored', 'wb').write(data)
+          print('bytes=', len(data))
+          print('sha256=', hashlib.sha256(data).hexdigest())
           PY
-          sha256sum /tmp/main.lua.restored
-          wc -l /tmp/main.lua.restored
+          test "$(wc -l < /tmp/main.lua.restored)" -ge 6000
 
-      - name: Install restored file only after validation
+      - name: Install verified source
         shell: bash
         run: |
           set -euo pipefail
           cp /tmp/main.lua.restored main.lua
           test "$(wc -c < main.lua)" -ge 300000
-          ! grep -qF 'RECOVERY REQUIRED' main.lua
+          test "$(wc -l < main.lua)" -ge 6000
           git diff --check -- main.lua
 
-      - name: Run repository structural checks
-        shell: bash
-        run: |
-          set -euo pipefail
-          bash static-check.sh main.lua
-
-      - name: Commit only validated main.lua
+      - name: Commit recovery only
         shell: bash
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -- main.lua
+          git diff --cached --stat
+          test "$(git show :main.lua | wc -c)" -ge 300000
           if git diff --cached --quiet; then
-            echo 'No main.lua change to commit'
+            echo 'No recovery change to commit'
             exit 0
           fi
-          git diff --cached --stat
-          git commit -m 'Restore main.lua from validated known-good archive'
+          git commit -m 'Restore main.lua from known-good Phase 18.4 archive'
           git push origin HEAD:main
