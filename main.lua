@@ -965,8 +965,10 @@ function TargetService:Unlock(reason, expectedSource)
         local reasonText = tostring(reason or "")
         if string.sub(reasonText, 1, 9) == "deathnote" and currentSource ~= "deathnote" then
             return false, "source_mismatch"
-        elseif (reasonText == "warp_mode" or reasonText == "warp_off"
-            or reasonText == "movement_owner_switch") and currentSource ~= "warp" then
+        elseif reasonText == "warp_mode" and currentSource ~= "deathnote" then
+            return false, "source_mismatch"
+        elseif (reasonText == "warp_off" or reasonText == "movement_owner_switch")
+            and currentSource ~= "warp" then
             return false, "source_mismatch"
         end
     end
