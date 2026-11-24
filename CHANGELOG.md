@@ -15,3 +15,11 @@
 ## Phase 16
 - MM2 Role ESP uses its own `TayJay_MM2RoleESP` BillboardGui instead of reusing
   `TayJay_PlayerESP`. See `patches/phase16_mm2_billboard_fix.lua`.
+
+
+## Phase 18.2 / 18.3
+- Restored the title `UIGradient` / `ColorSequence.new` constructor and parent assignment.
+- Added source-aware TargetService unlock protection.
+- Added TargetService reset during startup and before global Owner shutdown in STOP ALL.
+- Kept Dynamic Walk nearest-target selection, 25-stud range, and 0.25-second attack cooldown unchanged.
+- Added structural regression guards in `static-check.sh`. Static checks are not a Luau parser or live Delta runtime test.
