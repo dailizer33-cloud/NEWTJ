@@ -1,1 +1,1 @@
-__CONTENT_TOO_LARGE_FROM_LOCAL_FILE__
+-- main.lua recovery pending: use the attached source file as the authoritative restore source.
