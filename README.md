@@ -3,17 +3,17 @@
 สคริปต์ Lua แบบ client (สไตล์ executor) ไฟล์เดียว: เมนู UI, Player ESP, MM2 Role ESP,
 Death Note / Monster Warp, Rapid Bite, FPS Booster, Server Hop ฯลฯ
 
-> สถานะ: **Phase 17** — ดู `CHANGELOG.md`
+> สถานะ: **Phase 18.3** — GitHub `main.lua` เป็น Source of Truth
 
 ## โครงสร้าง
 
 | Path | คืออะไร |
 |---|---|
-| `src/main.lua` | ตัวสคริปต์หลัก (Phase 17) |
-| `src/original.txt` | snapshot ต้นฉบับก่อน Phase 16 |
+| `main.lua` | ตัวสคริปต์หลัก (Phase 18.3) |
+| `original.txt` | snapshot ต้นฉบับก่อน Phase 16 |
 | `patches/` | patch ของแต่ละ phase (`.diff` ใช้ `git apply` ได้) |
 | `docs/` | บันทึกแต่ละ phase + checklist |
-| `scripts/static-check.sh` | ตรวจโครงสร้างโค้ดด้วย grep (ไม่ใช่การรันจริง) |
+| `static-check.sh` | ตรวจโครงสร้างโค้ดด้วย grep (ไม่ใช่การรันจริง) |
 
 ## วิธีรัน
 
@@ -21,12 +21,12 @@ Death Note / Monster Warp, Rapid Bite, FPS Booster, Server Hop ฯลฯ
 `setclipboard`, `writefile`/`readfile`) จึงออกแบบให้รันผ่าน executor ในเกม ไม่ใช่โมดูลที่วางใน
 Roblox Studio ได้ทันที — ใน Studio ฟังก์ชันเหล่านี้ส่วนใหญ่เป็น `nil` ทดสอบได้แค่ UI/ESP บางส่วน
 
-**แบบวางไฟล์โดยตรง:** เปิด `src/main.lua` แล้ววางทั้งไฟล์ใน executor แล้วกด Execute
+**แบบวางไฟล์โดยตรง:** เปิด `main.lua` แล้ววางทั้งไฟล์ใน executor แล้วกด Execute
 
 **แบบโหลดจาก repo ของคุณ** (แก้ `<USER>` / `<REPO>` / branch ให้ตรง):
 
 ```lua
-loadstring(game:HttpGet("https://raw.githubusercontent.com/<USER>/<REPO>/main/src/main.lua"))()
+loadstring(game:HttpGet("https://raw.githubusercontent.com/dailizer33-cloud/NEWTJ/main/main.lua"))()
 ```
 
 หมายเหตุ: ใช้ลักษณะนี้หมายความว่าใครมีสิทธิ์เขียน repo ก็คุมโค้ดที่คุณรัน — เปิด 2FA และจำกัดสิทธิ์ push
@@ -36,7 +36,7 @@ loadstring(game:HttpGet("https://raw.githubusercontent.com/<USER>/<REPO>/main/sr
 ## ตรวจโค้ดก่อน commit
 
 ```bash
-./scripts/static-check.sh src/main.lua
+bash static-check.sh main.lua
 ```
 
 ตรวจว่า MM2 ใช้ billboard ของตัวเอง (`TayJay_MM2RoleESP`), billboard ปกติ
@@ -48,9 +48,14 @@ structural check
 
 ## ทดสอบจริง
 
-ดู checklist ใน `docs/PHASE17.md` (ESP ปิด/เปิดคู่กับ MM2, เปลี่ยน role, respawn, STOP ALL,
+ดูรายละเอียด Phase 18.3 ใน `docs/PHASE18_3.md` (ESP ปิด/เปิดคู่กับ MM2, เปลี่ยน role, respawn, STOP ALL,
 รันซ้ำ 2 รอบ)
 
 ## License
 
 ยังไม่ได้เลือก license — ดู `LICENSE.txt` ก่อนทำ repo เป็น public
+
+
+## Source of Truth
+
+ตั้งแต่ Phase 18.3 เป็นต้นไป ให้ใช้ `main.lua` บน GitHub branch `main` เป็นไฟล์หลักในการอ่าน ตรวจสอบ และพัฒนาต่อ ไฟล์ใน Library ใช้เป็นแหล่งอ้างอิงย้อนหลังเท่านั้น เว้นแต่ผู้ใช้จะสั่งเปลี่ยนแหล่งต้นฉบับ
