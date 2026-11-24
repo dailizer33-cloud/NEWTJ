@@ -1,0 +1,113 @@
+name: FPS-independent Monster lerp
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Patch monsterSoftApply
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('main.lua')
+          text = path.read_text(encoding='utf-8')
+          if 'local stepDt = since' in text and 'MONSTER_GLIDE_SPEED * stepDt' in text:
+              print('already patched')
+              raise SystemExit(0)
+          old = '''    local function monsterSoftApply(myRoot, desiredCF, character, targetModel, dt, aerial)
+          local now = os.clock()
+          if now - monsterLastMoveAt < MONSTER_MOVE_COOLDOWN then
+             return false, "cooldown"
+          end
+          dt = tonumber(dt) or 0.016
+          if dt <= 0 then dt = 0.016 end
+          if dt > 0.1 then dt = 0.1 end -- avoid huge jumps after hitch
+          local current = myRoot.CFrame
+          local from = current.Position
+          local desiredPos = desiredCF.Position
+          local delta = desiredPos - from
+          local distance = delta.Magnitude
+          -- Phase physics fix: GLIDE_SPEED is real studs/sec cap before hop clamp
+          local maxStep = MONSTER_GLIDE_SPEED * dt
+'''
+          new = '''    local function monsterSoftApply(myRoot, desiredCF, character, targetModel, dt, aerial)
+          local now = os.clock()
+          local since = (monsterLastMoveAt > 0) and (now - monsterLastMoveAt) or 0
+          if since > 0 and since < MONSTER_MOVE_COOLDOWN then
+             return false, "cooldown"
+          end
+          -- Frame dt changes with FPS. Use time since the last write so 30/60/144 feel the same.
+          local frameDt = tonumber(dt) or (1 / 60)
+          if frameDt <= 0 then frameDt = 1 / 60 end
+          if frameDt > 0.1 then frameDt = 0.1 end
+          local stepDt = since
+          if stepDt <= 0 or stepDt > 0.1 then
+             stepDt = frameDt
+          end
+          local current = myRoot.CFrame
+          local from = current.Position
+          local desiredPos = desiredCF.Position
+          local delta = desiredPos - from
+          local distance = delta.Magnitude
+          -- GLIDE_SPEED is studs/sec. Scale by real elapsed time, not the raw frame dt.
+          local maxStep = MONSTER_GLIDE_SPEED * stepDt
+'''
+          if old not in text:
+              raise SystemExit('header block not found')
+          text = text.replace(old, new, 1)
+          old_a = '''      -- blend: softer overall, less aggressive when close (ลดกระตุก)
+          local farFactor = math.clamp(distance / 28, 0, 1)
+          local alphaH = math.clamp(MONSTER_HORIZONTAL_LERP + farFactor * 0.18, 0.12, 0.58)
+          local alphaV = aerial
+             and math.clamp(MONSTER_VERTICAL_LERP + 0.18, 0.18, 0.72)
+             or math.clamp(MONSTER_VERTICAL_LERP + farFactor * 0.08, 0.10, 0.55)
+'''
+          new_a = '''      -- ref* is the blend for one cooldown step. Convert with elapsed time so FPS does not change the feel.
+          local farFactor = math.clamp(distance / 28, 0, 1)
+          local refH = math.clamp(MONSTER_HORIZONTAL_LERP + farFactor * 0.18, 0.12, 0.58)
+          local refV = aerial
+             and math.clamp(MONSTER_VERTICAL_LERP + 0.18, 0.18, 0.72)
+             or math.clamp(MONSTER_VERTICAL_LERP + farFactor * 0.08, 0.10, 0.55)
+          local kH = -math.log(1 - refH) / MONSTER_MOVE_COOLDOWN
+          local kV = -math.log(1 - refV) / MONSTER_MOVE_COOLDOWN
+          local alphaH = math.clamp(1 - math.exp(-kH * stepDt), 0.02, 0.9)
+          local alphaV = math.clamp(1 - math.exp(-kV * stepDt), 0.02, 0.9)
+'''
+          if old_a not in text:
+              raise SystemExit('alpha block not found')
+          text = text.replace(old_a, new_a, 1)
+          if len(text.encode('utf-8')) < 300000:
+              raise SystemExit('file too small')
+          if 'MONSTER_GLIDE_SPEED * dt' in text.split('local function monsterSoftApply',1)[1].split('local function monsterGlueStep',1)[0]:
+              raise SystemExit('raw frame dt still used for glide inside soft apply')
+          path.write_text(text, encoding='utf-8')
+          print('patched', len(text.encode('utf-8')))
+          PY
+
+      - name: Commit and push
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(wc -c < main.lua)" -ge 300000
+          grep -qF 'local stepDt = since' main.lua
+          grep -qF 'MONSTER_GLIDE_SPEED * stepDt' main.lua
+          grep -qF 'math.exp(-kH * stepDt)' main.lua
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- main.lua
+          if git diff --cached --quiet; then
+            echo 'already up to date'
+            exit 0
+          fi
+          git commit -m 'Monster Warp: make lerp and glide speed FPS-independent'
+          git push origin HEAD:main
