@@ -2,6 +2,10 @@ name: Restore main.lua safely
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/restore-main.yml'
 
 permissions:
   contents: write
