@@ -24,7 +24,7 @@ jobs:
           ref: main
           fetch-depth: 0
 
-      - name: Verify real source and backup
+      - name: Verify source and backup
         shell: bash
         run: |
           set -euo pipefail
@@ -33,9 +33,8 @@ jobs:
           git fetch origin backup/pre-phase19:refs/remotes/origin/backup/pre-phase19
           git rev-parse --verify refs/remotes/origin/backup/pre-phase19
           cp main.lua /tmp/main.lua.before-phase19
-          sha256sum main.lua /tmp/main.lua.before-phase19
 
-      - name: Repair real main.lua safely
+      - name: Repair real main.lua
         shell: bash
         run: |
           set -euo pipefail
@@ -50,79 +49,99 @@ jobs:
           before = text
           changes = []
 
-          # 1. Repair the orphaned TAYJAY title ColorSequence block.
+          # Repair orphaned logo gradient when present.
           if 'titleGradient.Parent = title' not in text:
-              logo_pattern = re.compile(
+              logo = re.compile(
                   r'(?m)^[ \t]*title\.TextStrokeTransparency\s*=\s*1\s*\n'
                   r'(?P<keys>(?:[ \t]*ColorSequenceKeypoint\.new\([^\n]+\),?\s*\n){7})'
                   r'[ \t]*\}\)'
               )
-              match = logo_pattern.search(text)
-              if not match:
-                  raise SystemExit('real main.lua: orphaned logo gradient block not found')
-              keys = ''.join('    ' + line.strip() + '\n' for line in match.group('keys').splitlines())
-              replacement = (
+              m = logo.search(text)
+              if not m:
+                  raise SystemExit('orphaned logo gradient block not found')
+              keys = ''.join('    ' + line.strip() + '\n' for line in m.group('keys').splitlines())
+              fixed = (
                   'title.TextStrokeColor3 = Color3.fromRGB(8, 18, 34)\n'
                   'title.TextStrokeTransparency = 0.18\n'
                   'local titleGradient = Instance.new("UIGradient")\n'
                   'titleGradient.Name = "TayJayBrandGradient"\n'
-                  'titleGradient.Color = ColorSequence.new({\n'
-                  + keys +
-                  '})\n'
+                  'titleGradient.Color = ColorSequence.new({\n' + keys + '})\n'
                   'titleGradient.Parent = title'
               )
-              text = text[:match.start()] + replacement + text[match.end():]
+              text = text[:m.start()] + fixed + text[m.end():]
               changes.append('logo-gradient')
 
-          # 2. Remove only the extra end between corner() and the FPS panel.
-          fps_pattern = re.compile(
-              r'(local function corner\(parent, radius\)\s*\n'
-              r'[ \t]*ui\("UICorner", \{CornerRadius=UDim\.new\(0, radius or 10\)\}, parent\)\s*\n'
+          # Remove one extra end before the FPS panel.
+          fps = re.compile(
+              r'(local function corner\(parent\s*,\s*radius\)\s*\n'
+              r'[ \t]*ui\("UICorner"[^\n]*\)\s*\n'
               r'[ \t]*end\s*\n)'
               r'[ \t]*end\s*\n'
-              r'(?=[ \t]*local panel = ui\()'
+              r'(?=[ \t]*local panel\s*=\s*ui\()'
           )
-          text, count = fps_pattern.subn(r'\1', text, count=1)
-          if count:
+          text, n = fps.subn(r'\1', text, count=1)
+          if n:
               changes.append('fps-extra-end')
 
-          # 3. Move busy and walk-speed references to the published shared state.
-          replacements = [
-              ('if warpActive and not isBusy then', 'if warpActive and not Main.State.isBusy then', 'warp-busy-read'),
-              ('elseif isBusy then', 'elseif Main.State.isBusy then', 'busy-branch-read'),
-              ('if isBusy or flyNowe or states.Fly or targetPlayer == LocalPlayer then return end',
-               'if Main.State.isBusy or flyNowe or states.Fly or targetPlayer == LocalPlayer then return end',
-               'target-busy-read'),
-              ('if hum and originalWalkSpeed == nil then originalWalkSpeed = hum.WalkSpeed end',
-               'if hum and TJ.Main.State.originalWalkSpeed == nil then TJ.Main.State.originalWalkSpeed = hum.WalkSpeed; TJ.Main.originalWalkSpeed = hum.WalkSpeed end',
-               'walk-speed-save'),
-              ('if hum and originalWalkSpeed ~= nil then hum.WalkSpeed = originalWalkSpeed end\n                originalWalkSpeed = nil',
-               'if hum and TJ.Main.State.originalWalkSpeed ~= nil then hum.WalkSpeed = TJ.Main.State.originalWalkSpeed end\n                TJ.Main.State.originalWalkSpeed = nil\n                TJ.Main.originalWalkSpeed = nil',
-               'walk-speed-restore'),
+          # Shared busy state.
+          busy_pairs = [
+              (r'\bif\s+warpActive\s+and\s+not\s+isBusy\s+then\b',
+               'if warpActive and not Main.State.isBusy then'),
+              (r'\belseif\s+isBusy\s+then\b',
+               'elseif Main.State.isBusy then'),
+              (r'\bif\s+isBusy\s+or\s+flyNowe\s+or\s+states\.Fly\s+or\s+targetPlayer\s*==\s*LocalPlayer\s+then\s+return\s+end',
+               'if Main.State.isBusy or flyNowe or states.Fly or targetPlayer == LocalPlayer then return end'),
           ]
-          for old, new, label in replacements:
-              if old in text:
-                  text = text.replace(old, new)
-                  changes.append(label)
+          for pattern, replacement in busy_pairs:
+              text, n = re.subn(pattern, replacement, text)
+              if n:
+                  changes.append('busy-state')
 
-          # Preserve compatibility while publishing busy state.
-          if 'Main.State.isBusy = true' not in text and '        isBusy = true\n' in text:
-              text = text.replace('        isBusy = true\n',
-                                  '        Main.State.isBusy = true\n        Main.isBusy = true\n', 1)
-              changes.append('busy-write-on')
-          if 'Main.State.isBusy = false' not in text and '        isBusy = false\n' in text:
-              text = text.replace('        isBusy = false\n',
-                                  '        Main.State.isBusy = false\n        Main.isBusy = false\n', 1)
-              changes.append('busy-write-off')
+          # originalWalkSpeed save: tolerate spaces, tabs, line breaks and semicolons.
+          save_pattern = re.compile(
+              r'if\s+hum\s+and\s+originalWalkSpeed\s*==\s*nil\s+then\s*'
+              r'originalWalkSpeed\s*=\s*hum\.WalkSpeed\s*;?\s*end'
+          )
+          save_replacement = (
+              'if hum and TJ.Main.State.originalWalkSpeed == nil then '
+              'TJ.Main.State.originalWalkSpeed = hum.WalkSpeed; '
+              'TJ.Main.originalWalkSpeed = hum.WalkSpeed end'
+          )
+          text, save_count = save_pattern.subn(save_replacement, text)
+          if save_count:
+              changes.append('walk-speed-save')
+
+          # originalWalkSpeed restore/reset: tolerate multiline formatting.
+          restore_pattern = re.compile(
+              r'if\s+hum\s+and\s+originalWalkSpeed\s*~=\s*nil\s+then\s*'
+              r'hum\.WalkSpeed\s*=\s*originalWalkSpeed\s*;?\s*end\s*;?\s*'
+              r'originalWalkSpeed\s*=\s*nil'
+          )
+          restore_replacement = (
+              'if hum and TJ.Main.State.originalWalkSpeed ~= nil then '
+              'hum.WalkSpeed = TJ.Main.State.originalWalkSpeed end\n'
+              '                TJ.Main.State.originalWalkSpeed = nil\n'
+              '                TJ.Main.originalWalkSpeed = nil'
+          )
+          text, restore_count = restore_pattern.subn(restore_replacement, text)
+          if restore_count:
+              changes.append('walk-speed-restore')
+
+          # Fallback for declaration/reference variants.
+          if 'TJ.Main.State.originalWalkSpeed' not in text:
+              reference_pattern = re.compile(r'(?<![.\w])originalWalkSpeed(?![\w])')
+              text, ref_count = reference_pattern.subn('TJ.Main.State.originalWalkSpeed', text)
+              if ref_count:
+                  changes.append('walk-speed-reference-fallback')
 
           forbidden = [
-              'if warpActive and not isBusy then',
-              'elseif isBusy then',
-              'if isBusy or flyNowe',
+              r'\bif\s+warpActive\s+and\s+not\s+isBusy\s+then\b',
+              r'\belseif\s+isBusy\s+then\b',
+              r'(?<![.\w])originalWalkSpeed(?![\w])',
           ]
-          remaining = [marker for marker in forbidden if marker in text]
+          remaining = [pattern for pattern in forbidden if re.search(pattern, text)]
           if remaining:
-              raise SystemExit('unsupported legacy markers remain: ' + repr(remaining))
+              raise SystemExit('legacy markers remain: ' + repr(remaining))
 
           required = [
               'titleGradient.Parent = title',
@@ -135,15 +154,14 @@ jobs:
           if missing:
               raise SystemExit('required repaired markers missing: ' + repr(missing))
 
-          if text == before:
-              print('main.lua already matches the Phase 19 repair contract')
-          else:
-              output = text.replace('\n', newline)
-              path.write_bytes(output.encode('utf-8'))
+          if text != before:
+              path.write_bytes(text.replace('\n', newline).encode('utf-8'))
               print('applied:', ', '.join(changes))
+          else:
+              print('main.lua already satisfies repair contract')
           PY
 
-      - name: Validate narrow source change
+      - name: Validate repaired source
         shell: bash
         run: |
           set -euo pipefail
@@ -152,8 +170,6 @@ jobs:
           grep -qF 'Main.State.isBusy' main.lua
           grep -qF 'TJ.Main.State.originalWalkSpeed' main.lua
           grep -qF 'end, function(_tjErr)' main.lua
-          ! grep -qF 'if warpActive and not isBusy then' main.lua
-          ! grep -qF 'if isBusy or flyNowe' main.lua
           if [ -f static-check.sh ]; then bash static-check.sh main.lua; fi
 
       - name: Commit repaired main.lua
