@@ -1,1 +1,3 @@
-__FROM_LOCAL_FILE_UNSUPPORTED__
+-- TAYJAY RECOVERY REQUIRED
+-- Phase 19 commit transport could not upload the prepared local file.
+-- Use previous blob 847a6e3d108d523f583854287cadd8acad2c98c4 as recovery source.
