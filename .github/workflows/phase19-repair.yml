@@ -1,6 +1,5 @@
 name: Phase 19 repair and validation
 
-# Trigger nonce: approved-retry-2026-11-25-0041
 on:
   push:
     branches: [main]
@@ -11,72 +10,152 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: phase19-repair-main
+  cancel-in-progress: false
+
 jobs:
   repair:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout main
+        uses: actions/checkout@v4
         with:
           ref: main
           fetch-depth: 0
-      - name: Repair and validate
+
+      - name: Verify real source and backup
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f main.lua
+          test "$(wc -c < main.lua)" -ge 300000
+          git fetch origin backup/pre-phase19:refs/remotes/origin/backup/pre-phase19
+          git rev-parse --verify refs/remotes/origin/backup/pre-phase19
+          cp main.lua /tmp/main.lua.before-phase19
+          sha256sum main.lua /tmp/main.lua.before-phase19
+
+      - name: Repair real main.lua safely
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
-          p=Path('main.lua'); s=p.read_text(encoding='utf-8'); old=s
-          a=''' title.TextStrokeTransparency = 1
-    ColorSequenceKeypoint.new(0.00, Color3.fromRGB(255, 105, 180)),
-    ColorSequenceKeypoint.new(0.18, Color3.fromRGB(255, 190, 225)),
-    ColorSequenceKeypoint.new(0.36, Color3.fromRGB(160, 235, 255)),
-    ColorSequenceKeypoint.new(0.54, Color3.fromRGB(170, 255, 190)),
-    ColorSequenceKeypoint.new(0.72, Color3.fromRGB(255, 245, 150)),
-    ColorSequenceKeypoint.new(0.88, Color3.fromRGB(255, 175, 115)),
-    ColorSequenceKeypoint.new(1.00, Color3.fromRGB(255, 105, 180)),
-})'''
-          b='''title.TextStrokeColor3 = Color3.fromRGB(8, 18, 34)
-title.TextStrokeTransparency = 0.18
-local titleGradient = Instance.new("UIGradient")
-titleGradient.Name = "TayJayBrandGradient"
-titleGradient.Color = ColorSequence.new({
-    ColorSequenceKeypoint.new(0.00, Color3.fromRGB(255, 105, 180)),
-    ColorSequenceKeypoint.new(0.18, Color3.fromRGB(255, 190, 225)),
-    ColorSequenceKeypoint.new(0.36, Color3.fromRGB(160, 235, 255)),
-    ColorSequenceKeypoint.new(0.54, Color3.fromRGB(170, 255, 190)),
-    ColorSequenceKeypoint.new(0.72, Color3.fromRGB(255, 245, 150)),
-    ColorSequenceKeypoint.new(0.88, Color3.fromRGB(255, 175, 115)),
-    ColorSequenceKeypoint.new(1.00, Color3.fromRGB(255, 105, 180)),
-})
-titleGradient.Parent = title'''
-          if a not in s: raise SystemExit('logo corruption marker missing')
-          s=s.replace(a,b,1)
-          a='''local function corner(parent, radius)
-    ui("UICorner", {CornerRadius=UDim.new(0, radius or 10)}, parent)
-end
-end
-local panel = ui('''
-          b='''local function corner(parent, radius)
-    ui("UICorner", {CornerRadius=UDim.new(0, radius or 10)}, parent)
-end
-local panel = ui('''
-          if a not in s: raise SystemExit('FPS scope corruption marker missing')
-          s=s.replace(a,b,1)
-          s=s.replace('if warpActive and not isBusy then','if warpActive and not Main.State.isBusy then')
-          s=s.replace('elseif isBusy then','elseif Main.State.isBusy then')
-          s=s.replace('if isBusy or flyNowe or states.Fly or targetPlayer == LocalPlayer then return end','if Main.State.isBusy or flyNowe or states.Fly or targetPlayer == LocalPlayer then return end')
-          s=s.replace('        isBusy = true\n','        Main.State.isBusy = true\n        Main.isBusy = true\n',1)
-          s=s.replace('        isBusy = false\n','        Main.State.isBusy = false\n        Main.isBusy = false\n',1)
-          s=s.replace('if hum and originalWalkSpeed == nil then originalWalkSpeed = hum.WalkSpeed end','if hum and TJ.Main.State.originalWalkSpeed == nil then TJ.Main.State.originalWalkSpeed = hum.WalkSpeed; TJ.Main.originalWalkSpeed = hum.WalkSpeed end')
-          s=s.replace('if hum and originalWalkSpeed ~= nil then hum.WalkSpeed = originalWalkSpeed end\n                originalWalkSpeed = nil','if hum and TJ.Main.State.originalWalkSpeed ~= nil then hum.WalkSpeed = TJ.Main.State.originalWalkSpeed end\n                TJ.Main.State.originalWalkSpeed = nil\n                TJ.Main.originalWalkSpeed = nil')
-          bad=[' title.TextStrokeTransparency = 1\n    ColorSequenceKeypoint.new','end\nend\nlocal panel = ui(','if warpActive and not isBusy then','elseif isBusy then','if isBusy or flyNowe']
-          if any(x in s for x in bad): raise SystemExit('forbidden marker remains')
-          need=['titleGradient.Parent = title','local panel = ui("Frame"','Main.State.isBusy','TJ.Main.State.originalWalkSpeed','end, function(_tjErr)']
-          if any(x not in s for x in need): raise SystemExit('required repaired marker missing')
-          if s==old: raise SystemExit('no repair applied')
-          p.write_text(s,encoding='utf-8')
-          print('Phase 19 structural validation passed')
+          import re
+
+          path = Path('main.lua')
+          raw = path.read_bytes()
+          newline = '\r\n' if b'\r\n' in raw else '\n'
+          text = raw.decode('utf-8').replace('\r\n', '\n')
+          before = text
+          changes = []
+
+          # 1. Repair the orphaned TAYJAY title ColorSequence block.
+          if 'titleGradient.Parent = title' not in text:
+              logo_pattern = re.compile(
+                  r'(?m)^[ \t]*title\.TextStrokeTransparency\s*=\s*1\s*\n'
+                  r'(?P<keys>(?:[ \t]*ColorSequenceKeypoint\.new\([^\n]+\),?\s*\n){7})'
+                  r'[ \t]*\}\)'
+              )
+              match = logo_pattern.search(text)
+              if not match:
+                  raise SystemExit('real main.lua: orphaned logo gradient block not found')
+              keys = ''.join('    ' + line.strip() + '\n' for line in match.group('keys').splitlines())
+              replacement = (
+                  'title.TextStrokeColor3 = Color3.fromRGB(8, 18, 34)\n'
+                  'title.TextStrokeTransparency = 0.18\n'
+                  'local titleGradient = Instance.new("UIGradient")\n'
+                  'titleGradient.Name = "TayJayBrandGradient"\n'
+                  'titleGradient.Color = ColorSequence.new({\n'
+                  + keys +
+                  '})\n'
+                  'titleGradient.Parent = title'
+              )
+              text = text[:match.start()] + replacement + text[match.end():]
+              changes.append('logo-gradient')
+
+          # 2. Remove only the extra end between corner() and the FPS panel.
+          fps_pattern = re.compile(
+              r'(local function corner\(parent, radius\)\s*\n'
+              r'[ \t]*ui\("UICorner", \{CornerRadius=UDim\.new\(0, radius or 10\)\}, parent\)\s*\n'
+              r'[ \t]*end\s*\n)'
+              r'[ \t]*end\s*\n'
+              r'(?=[ \t]*local panel = ui\()'
+          )
+          text, count = fps_pattern.subn(r'\1', text, count=1)
+          if count:
+              changes.append('fps-extra-end')
+
+          # 3. Move busy and walk-speed references to the published shared state.
+          replacements = [
+              ('if warpActive and not isBusy then', 'if warpActive and not Main.State.isBusy then', 'warp-busy-read'),
+              ('elseif isBusy then', 'elseif Main.State.isBusy then', 'busy-branch-read'),
+              ('if isBusy or flyNowe or states.Fly or targetPlayer == LocalPlayer then return end',
+               'if Main.State.isBusy or flyNowe or states.Fly or targetPlayer == LocalPlayer then return end',
+               'target-busy-read'),
+              ('if hum and originalWalkSpeed == nil then originalWalkSpeed = hum.WalkSpeed end',
+               'if hum and TJ.Main.State.originalWalkSpeed == nil then TJ.Main.State.originalWalkSpeed = hum.WalkSpeed; TJ.Main.originalWalkSpeed = hum.WalkSpeed end',
+               'walk-speed-save'),
+              ('if hum and originalWalkSpeed ~= nil then hum.WalkSpeed = originalWalkSpeed end\n                originalWalkSpeed = nil',
+               'if hum and TJ.Main.State.originalWalkSpeed ~= nil then hum.WalkSpeed = TJ.Main.State.originalWalkSpeed end\n                TJ.Main.State.originalWalkSpeed = nil\n                TJ.Main.originalWalkSpeed = nil',
+               'walk-speed-restore'),
+          ]
+          for old, new, label in replacements:
+              if old in text:
+                  text = text.replace(old, new)
+                  changes.append(label)
+
+          # Preserve compatibility while publishing busy state.
+          if 'Main.State.isBusy = true' not in text and '        isBusy = true\n' in text:
+              text = text.replace('        isBusy = true\n',
+                                  '        Main.State.isBusy = true\n        Main.isBusy = true\n', 1)
+              changes.append('busy-write-on')
+          if 'Main.State.isBusy = false' not in text and '        isBusy = false\n' in text:
+              text = text.replace('        isBusy = false\n',
+                                  '        Main.State.isBusy = false\n        Main.isBusy = false\n', 1)
+              changes.append('busy-write-off')
+
+          forbidden = [
+              'if warpActive and not isBusy then',
+              'elseif isBusy then',
+              'if isBusy or flyNowe',
+          ]
+          remaining = [marker for marker in forbidden if marker in text]
+          if remaining:
+              raise SystemExit('unsupported legacy markers remain: ' + repr(remaining))
+
+          required = [
+              'titleGradient.Parent = title',
+              'local panel = ui(',
+              'Main.State.isBusy',
+              'TJ.Main.State.originalWalkSpeed',
+              'end, function(_tjErr)',
+          ]
+          missing = [marker for marker in required if marker not in text]
+          if missing:
+              raise SystemExit('required repaired markers missing: ' + repr(missing))
+
+          if text == before:
+              print('main.lua already matches the Phase 19 repair contract')
+          else:
+              output = text.replace('\n', newline)
+              path.write_bytes(output.encode('utf-8'))
+              print('applied:', ', '.join(changes))
           PY
+
+      - name: Validate narrow source change
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(wc -c < main.lua)" -ge 300000
+          grep -qF 'titleGradient.Parent = title' main.lua
+          grep -qF 'Main.State.isBusy' main.lua
+          grep -qF 'TJ.Main.State.originalWalkSpeed' main.lua
+          grep -qF 'end, function(_tjErr)' main.lua
+          ! grep -qF 'if warpActive and not isBusy then' main.lua
+          ! grep -qF 'if isBusy or flyNowe' main.lua
+          if [ -f static-check.sh ]; then bash static-check.sh main.lua; fi
+
       - name: Commit repaired main.lua
         shell: bash
         run: |
@@ -84,6 +163,10 @@ local panel = ui('''
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -- main.lua
-          git diff --cached --quiet && exit 0
-          git commit -m 'Phase 19: repair startup syntax and shared state'
+          if git diff --cached --quiet; then
+            echo 'main.lua already ready for Phase 19'
+            exit 0
+          fi
+          git diff --cached --stat
+          git commit -m 'Phase 19: repair real main.lua startup and shared state'
           git push origin HEAD:main
