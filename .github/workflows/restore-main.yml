@@ -1,25 +1,25 @@
-name: Restore main.lua
+name: Restore main.lua safely
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/restore-main.yml'
 
 permissions:
   contents: write
+
+concurrency:
+  group: restore-main
+  cancel-in-progress: false
 
 jobs:
   restore:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout full history
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Restore main.lua from known-good commit archive
+      - name: Restore to temporary file and validate
         shell: bash
         run: |
           set -euo pipefail
@@ -27,22 +27,46 @@ jobs:
           python3 - <<'PY'
           import zipfile
           with zipfile.ZipFile('/tmp/Newtj.zip') as z:
-              data = z.read('Newtj/src/main.lua')
-          with open('main.lua', 'wb') as f:
+              info = z.getinfo('Newtj/src/main.lua')
+              data = z.read(info)
+          if len(data) < 300000:
+              raise SystemExit(f'restored main.lua unexpectedly small: {len(data)} bytes')
+          for marker in (b'local function claimPlayerMovement()', b'local function startMonsterWarp()', b'_G.TAYJAY_STOP_ALL = function()'):
+              if marker not in data:
+                  raise SystemExit(f'missing critical marker: {marker!r}')
+          with open('/tmp/main.lua.restored', 'wb') as f:
               f.write(data)
-          print('restored bytes:', len(data))
+          print(f'restored bytes={len(data)}')
           PY
+          sha256sum /tmp/main.lua.restored
+          wc -l /tmp/main.lua.restored
 
-      - name: Commit restored main.lua
+      - name: Install restored file only after validation
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp /tmp/main.lua.restored main.lua
+          test "$(wc -c < main.lua)" -ge 300000
+          ! grep -qF 'RECOVERY REQUIRED' main.lua
+          git diff --check -- main.lua
+
+      - name: Run repository structural checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash static-check.sh main.lua
+
+      - name: Commit only validated main.lua
         shell: bash
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add main.lua
+          git add -- main.lua
           if git diff --cached --quiet; then
-            echo "No changes to commit"
+            echo 'No main.lua change to commit'
             exit 0
           fi
-          git commit -m "Restore main.lua from known-good archive"
+          git diff --cached --stat
+          git commit -m 'Restore main.lua from validated known-good archive'
           git push origin HEAD:main
