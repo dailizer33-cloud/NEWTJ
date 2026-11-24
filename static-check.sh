@@ -69,6 +69,19 @@ has "$target" 'self:StopCombatOwner(reason or "reset")' \
   || fail 'TargetService reset does not stop its combat Owner'
 pass 'TargetService unlock is source-aware and Reset stops its combat Owner'
 
+warp_guard="$(sed -n '/function TargetService:Unlock(reason, expectedSource)/,/function TargetService:Reset(reason)/p' "$FILE")"
+has "$warp_guard" 'reasonText == "warp_mode" and currentSource ~= "deathnote"' \
+  || fail 'WARP activation must release a Death Note-owned target'
+has "$warp_guard" 'reasonText == "warp_off" or reasonText == "movement_owner_switch"' \
+  || fail 'WARP-owned target release guards missing'
+warp_toggle="$(sed -n '/local function claimPlayerMovement()/,/-- WALK:/p' "$FILE")"
+has "$warp_toggle" 'TargetService.Source == "deathnote"' \
+  || fail 'WARP activation no longer checks Death Note target ownership'
+has "$warp_toggle" 'TargetService:Unlock("warp_mode")' \
+  || fail 'WARP activation target release call missing'
+pass 'WARP activation releases only a Death Note-owned target; WARP shutdown guards remain separate'
+
+
 grep -qF 'TargetService:Reset("STARTUP_RESET")' "$FILE" \
   || fail 'startup persistent-target reset missing'
 stopall="$(sed -n '/_G.TAYJAY_STOP_ALL = function()/,/print("\[TAYJAY\] STOP ALL completed/p' "$FILE")"
