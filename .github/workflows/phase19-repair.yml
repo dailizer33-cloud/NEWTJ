@@ -1,8 +1,9 @@
 name: Phase 19 repair and validation
 
-# Trigger nonce: approved-run-2026-11-25
+# Trigger nonce: approved-retry-2026-11-25-0041
 on:
   push:
+    branches: [main]
     paths:
       - '.github/workflows/phase19-repair.yml'
   workflow_dispatch:
@@ -21,6 +22,7 @@ jobs:
       - name: Repair and validate
         shell: bash
         run: |
+          set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
           p=Path('main.lua'); s=p.read_text(encoding='utf-8'); old=s
@@ -78,9 +80,10 @@ local panel = ui('''
       - name: Commit repaired main.lua
         shell: bash
         run: |
+          set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add main.lua
+          git add -- main.lua
           git diff --cached --quiet && exit 0
           git commit -m 'Phase 19: repair startup syntax and shared state'
           git push origin HEAD:main
