@@ -17,18 +17,13 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
-
-      - name: Repair known Phase 19 corruption
+      - name: Repair and validate
         shell: bash
         run: |
           python3 - <<'PY'
           from pathlib import Path
-
-          path = Path('main.lua')
-          text = path.read_text(encoding='utf-8')
-          original = text
-
-          broken_logo = ''' title.TextStrokeTransparency = 1
+          p=Path('main.lua'); s=p.read_text(encoding='utf-8'); old=s
+          a=''' title.TextStrokeTransparency = 1
     ColorSequenceKeypoint.new(0.00, Color3.fromRGB(255, 105, 180)),
     ColorSequenceKeypoint.new(0.18, Color3.fromRGB(255, 190, 225)),
     ColorSequenceKeypoint.new(0.36, Color3.fromRGB(160, 235, 255)),
@@ -37,7 +32,7 @@ jobs:
     ColorSequenceKeypoint.new(0.88, Color3.fromRGB(255, 175, 115)),
     ColorSequenceKeypoint.new(1.00, Color3.fromRGB(255, 105, 180)),
 })'''
-          fixed_logo = '''title.TextStrokeColor3 = Color3.fromRGB(8, 18, 34)
+          b='''title.TextStrokeColor3 = Color3.fromRGB(8, 18, 34)
 title.TextStrokeTransparency = 0.18
 local titleGradient = Instance.new("UIGradient")
 titleGradient.Name = "TayJayBrandGradient"
@@ -51,78 +46,40 @@ titleGradient.Color = ColorSequence.new({
     ColorSequenceKeypoint.new(1.00, Color3.fromRGB(255, 105, 180)),
 })
 titleGradient.Parent = title'''
-          if broken_logo not in text:
-              raise SystemExit('Expected broken logo block not found; refusing unsafe edit')
-          text = text.replace(broken_logo, fixed_logo, 1)
-
-          broken_scope = '''local function corner(parent, radius)
+          if a not in s: raise SystemExit('logo corruption marker missing')
+          s=s.replace(a,b,1)
+          a='''local function corner(parent, radius)
     ui("UICorner", {CornerRadius=UDim.new(0, radius or 10)}, parent)
 end
 end
 local panel = ui('''
-          fixed_scope = '''local function corner(parent, radius)
+          b='''local function corner(parent, radius)
     ui("UICorner", {CornerRadius=UDim.new(0, radius or 10)}, parent)
 end
 local panel = ui('''
-          if broken_scope not in text:
-              raise SystemExit('Expected FPS scope corruption not found; refusing unsafe edit')
-          text = text.replace(broken_scope, fixed_scope, 1)
-
-          text = text.replace('if warpActive and not isBusy then', 'if warpActive and not Main.State.isBusy then')
-          text = text.replace('elseif isBusy then', 'elseif Main.State.isBusy then')
-          text = text.replace('if isBusy or flyNowe or states.Fly or targetPlayer == LocalPlayer then return end',
-                              'if Main.State.isBusy or flyNowe or states.Fly or targetPlayer == LocalPlayer then return end')
-          text = text.replace('        isBusy = true\n', '        Main.State.isBusy = true\n        Main.isBusy = true\n', 1)
-          text = text.replace('        isBusy = false\n', '        Main.State.isBusy = false\n        Main.isBusy = false\n', 1)
-
-          text = text.replace('if hum and originalWalkSpeed == nil then originalWalkSpeed = hum.WalkSpeed end',
-                              'if hum and TJ.Main.State.originalWalkSpeed == nil then TJ.Main.State.originalWalkSpeed = hum.WalkSpeed; TJ.Main.originalWalkSpeed = hum.WalkSpeed end')
-          text = text.replace('if hum and originalWalkSpeed ~= nil then hum.WalkSpeed = originalWalkSpeed end\n                originalWalkSpeed = nil',
-                              'if hum and TJ.Main.State.originalWalkSpeed ~= nil then hum.WalkSpeed = TJ.Main.State.originalWalkSpeed end\n                TJ.Main.State.originalWalkSpeed = nil\n                TJ.Main.originalWalkSpeed = nil')
-
-          if text == original:
-              raise SystemExit('No repair was applied')
-          path.write_text(text, encoding='utf-8')
-          PY
-
-      - name: Structural validation
-        shell: bash
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          s = Path('main.lua').read_text(encoding='utf-8')
-          forbidden = [
-              ' title.TextStrokeTransparency = 1\n    ColorSequenceKeypoint.new',
-              'end\nend\nlocal panel = ui(',
-              'if warpActive and not isBusy then',
-              'elseif isBusy then',
-              'if isBusy or flyNowe',
-          ]
-          found = [x for x in forbidden if x in s]
-          if found:
-              raise SystemExit('Structural validation failed: ' + repr(found))
-          required = [
-              'titleGradient.Parent = title',
-              'local panel = ui("Frame"',
-              'Main.State.isBusy',
-              'TJ.Main.State.originalWalkSpeed',
-              'end, function(_tjErr)',
-          ]
-          missing = [x for x in required if x not in s]
-          if missing:
-              raise SystemExit('Required repaired markers missing: ' + repr(missing))
+          if a not in s: raise SystemExit('FPS scope corruption marker missing')
+          s=s.replace(a,b,1)
+          s=s.replace('if warpActive and not isBusy then','if warpActive and not Main.State.isBusy then')
+          s=s.replace('elseif isBusy then','elseif Main.State.isBusy then')
+          s=s.replace('if isBusy or flyNowe or states.Fly or targetPlayer == LocalPlayer then return end','if Main.State.isBusy or flyNowe or states.Fly or targetPlayer == LocalPlayer then return end')
+          s=s.replace('        isBusy = true\n','        Main.State.isBusy = true\n        Main.isBusy = true\n',1)
+          s=s.replace('        isBusy = false\n','        Main.State.isBusy = false\n        Main.isBusy = false\n',1)
+          s=s.replace('if hum and originalWalkSpeed == nil then originalWalkSpeed = hum.WalkSpeed end','if hum and TJ.Main.State.originalWalkSpeed == nil then TJ.Main.State.originalWalkSpeed = hum.WalkSpeed; TJ.Main.originalWalkSpeed = hum.WalkSpeed end')
+          s=s.replace('if hum and originalWalkSpeed ~= nil then hum.WalkSpeed = originalWalkSpeed end\n                originalWalkSpeed = nil','if hum and TJ.Main.State.originalWalkSpeed ~= nil then hum.WalkSpeed = TJ.Main.State.originalWalkSpeed end\n                TJ.Main.State.originalWalkSpeed = nil\n                TJ.Main.originalWalkSpeed = nil')
+          bad=[' title.TextStrokeTransparency = 1\n    ColorSequenceKeypoint.new','end\nend\nlocal panel = ui(','if warpActive and not isBusy then','elseif isBusy then','if isBusy or flyNowe']
+          if any(x in s for x in bad): raise SystemExit('forbidden marker remains')
+          need=['titleGradient.Parent = title','local panel = ui("Frame"','Main.State.isBusy','TJ.Main.State.originalWalkSpeed','end, function(_tjErr)']
+          if any(x not in s for x in need): raise SystemExit('required repaired marker missing')
+          if s==old: raise SystemExit('no repair applied')
+          p.write_text(s,encoding='utf-8')
           print('Phase 19 structural validation passed')
           PY
-
       - name: Commit repaired main.lua
         shell: bash
         run: |
-          if git diff --quiet -- main.lua; then
-            echo 'No main.lua changes to commit'
-            exit 0
-          fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add main.lua
+          git diff --cached --quiet && exit 0
           git commit -m 'Phase 19: repair startup syntax and shared state'
           git push origin HEAD:main
