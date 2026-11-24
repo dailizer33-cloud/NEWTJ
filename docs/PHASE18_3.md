@@ -23,3 +23,7 @@ GitHub repository `dailizer33-cloud/NEWTJ`, branch `main`, file `main.lua` is th
 
 ## Deployment
 The repository may be Private. Delta's unauthenticated `loadstring(game:HttpGet(...))()` cannot fetch a private raw file unless the runtime has a supported authenticated route. Make the repository Public only after reviewing the entire repository for secrets and private data.
+
+
+## Phase 18.4 regression note
+A call-site audit found that WARP activation invokes `Unlock("warp_mode")` only when the current source is `deathnote`. The Phase 18.3 guard incorrectly required `warp`, rejecting the intended handoff. Phase 18.4 now requires `deathnote` for `warp_mode`, while `warp_off` and `movement_owner_switch` continue to require `warp`. A dedicated structural regression check covers this contract.
