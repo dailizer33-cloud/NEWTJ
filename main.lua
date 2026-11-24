@@ -955,7 +955,21 @@ function TargetService:Lock(player, source)
     self:EnsureCombatOwner()
     return true
 end
-function TargetService:Unlock(reason)
+function TargetService:Unlock(reason, expectedSource)
+    local currentSource = self.Source
+    if expectedSource and currentSource ~= expectedSource then
+        return false, "source_mismatch"
+    end
+    -- Keep a stale subsystem from releasing a newer target owned by another subsystem.
+    if not expectedSource then
+        local reasonText = tostring(reason or "")
+        if string.sub(reasonText, 1, 9) == "deathnote" and currentSource ~= "deathnote" then
+            return false, "source_mismatch"
+        elseif (reasonText == "warp_mode" or reasonText == "warp_off"
+            or reasonText == "movement_owner_switch") and currentSource ~= "warp" then
+            return false, "source_mismatch"
+        end
+    end
     local previous = self:Get()
     self.Player = nil
     self.Source = "none"
@@ -969,6 +983,18 @@ function TargetService:Unlock(reason)
         self:StopCombatOwner(reason or "unlock")
     end
     notify("unlock", previous)
+    return true
+end
+function TargetService:Reset(reason)
+    local previous = self:Get()
+    self.Player = nil
+    self.Source = "none"
+    self.Locked = false
+    self.Released = true
+    mirrorLegacy()
+    statesRef.DNWarp = false
+    self:StopCombatOwner(reason or "reset")
+    notify("reset", previous)
     return true
 end
 function TargetService:SetTransient(player, source)
@@ -1150,6 +1176,9 @@ function TargetService:EnsureCombatOwner()
     end))
     return owner
 end
+-- A prior executor session may have left a persistent target in getgenv().
+-- Reset only target state here; feature owners are recreated by normal startup.
+TargetService:Reset("STARTUP_RESET")
 _tjTargetEnv.TAYJAY_TARGET = TargetService
 TJ.TargetService = TargetService
 Main.TargetService = TargetService
@@ -4897,6 +4926,8 @@ local title = Instance.new("TextLabel", mainFrame)
 title.Name = "TayJayBrandTitle"; title.Size = UDim2.new(1, 0, 0, 54); title.Position = UDim2.new(0, 0, 0, 0); title.BackgroundTransparency = 1; title.Text = "TAYJAY"; title.TextColor3 = GREEN.ink; title.TextSize = 48; title.Font = Enum.Font.FredokaOne
 -- ขอบเข้มหนาขึ้น (เดิมขอบขาวบนสีพาสเทล ทำให้ตัวอักษรกลืนกัน) เพื่อให้โลโก้อ่านชัด
  title.TextStrokeTransparency = 1
+local titleGradient = Instance.new("UIGradient")
+titleGradient.Color = ColorSequence.new({
     ColorSequenceKeypoint.new(0.00, Color3.fromRGB(255, 105, 180)),
     ColorSequenceKeypoint.new(0.18, Color3.fromRGB(255, 190, 225)),
     ColorSequenceKeypoint.new(0.36, Color3.fromRGB(160, 235, 255)),
@@ -4905,6 +4936,7 @@ title.Name = "TayJayBrandTitle"; title.Size = UDim2.new(1, 0, 0, 54); title.Posi
     ColorSequenceKeypoint.new(0.88, Color3.fromRGB(255, 175, 115)),
     ColorSequenceKeypoint.new(1.00, Color3.fromRGB(255, 105, 180)),
 })
+titleGradient.Parent = title
 end -- [/TAYJAY LOCAL-LIMIT FIX 7/8]
 local scroll = Instance.new("ScrollingFrame", mainFrame)
 scroll.Size = UDim2.new(1, -14, 1, -62); scroll.Position = UDim2.new(0, 7, 0, 56); scroll.BackgroundTransparency = 1; scroll.ScrollBarThickness = 6; scroll.ScrollBarImageColor3 = GREEN.neon
@@ -6677,6 +6709,12 @@ _G.TAYJAY_STOP_ALL = function()
     end)
     pcall(function()
         if type(_G.TAYJAY_WARP_STOP_NOW) == "function" then _G.TAYJAY_WARP_STOP_NOW(true) end
+    end)
+    -- Clear persistent target state and its dedicated combat Owner before global cleanup.
+    pcall(function()
+        if type(TargetService) == "table" and type(TargetService.Reset) == "function" then
+            TargetService:Reset("STOP_ALL")
+        end
     end)
     -- Stop every registered Owner only after movement cleanup has completed.
     pcall(function()
