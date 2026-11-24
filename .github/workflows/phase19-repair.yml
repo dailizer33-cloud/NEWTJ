@@ -49,7 +49,6 @@ jobs:
           before = text
           changes = []
 
-          # Repair orphaned logo gradient when present.
           if 'titleGradient.Parent = title' not in text:
               logo = re.compile(
                   r'(?m)^[ \t]*title\.TextStrokeTransparency\s*=\s*1\s*\n'
@@ -71,7 +70,6 @@ jobs:
               text = text[:m.start()] + fixed + text[m.end():]
               changes.append('logo-gradient')
 
-          # Remove one extra end before the FPS panel.
           fps = re.compile(
               r'(local function corner\(parent\s*,\s*radius\)\s*\n'
               r'[ \t]*ui\("UICorner"[^\n]*\)\s*\n'
@@ -83,12 +81,9 @@ jobs:
           if n:
               changes.append('fps-extra-end')
 
-          # Shared busy state.
           busy_pairs = [
-              (r'\bif\s+warpActive\s+and\s+not\s+isBusy\s+then\b',
-               'if warpActive and not Main.State.isBusy then'),
-              (r'\belseif\s+isBusy\s+then\b',
-               'elseif Main.State.isBusy then'),
+              (r'\bif\s+warpActive\s+and\s+not\s+isBusy\s+then\b', 'if warpActive and not Main.State.isBusy then'),
+              (r'\belseif\s+isBusy\s+then\b', 'elseif Main.State.isBusy then'),
               (r'\bif\s+isBusy\s+or\s+flyNowe\s+or\s+states\.Fly\s+or\s+targetPlayer\s*==\s*LocalPlayer\s+then\s+return\s+end',
                'if Main.State.isBusy or flyNowe or states.Fly or targetPlayer == LocalPlayer then return end'),
           ]
@@ -97,51 +92,32 @@ jobs:
               if n:
                   changes.append('busy-state')
 
-          # originalWalkSpeed save: tolerate spaces, tabs, line breaks and semicolons.
-          save_pattern = re.compile(
-              r'if\s+hum\s+and\s+originalWalkSpeed\s*==\s*nil\s+then\s*'
-              r'originalWalkSpeed\s*=\s*hum\.WalkSpeed\s*;?\s*end'
-          )
-          save_replacement = (
-              'if hum and TJ.Main.State.originalWalkSpeed == nil then '
-              'TJ.Main.State.originalWalkSpeed = hum.WalkSpeed; '
-              'TJ.Main.originalWalkSpeed = hum.WalkSpeed end'
-          )
-          text, save_count = save_pattern.subn(save_replacement, text)
-          if save_count:
-              changes.append('walk-speed-save')
-
-          # originalWalkSpeed restore/reset: tolerate multiline formatting.
-          restore_pattern = re.compile(
-              r'if\s+hum\s+and\s+originalWalkSpeed\s*~=\s*nil\s+then\s*'
-              r'hum\.WalkSpeed\s*=\s*originalWalkSpeed\s*;?\s*end\s*;?\s*'
-              r'originalWalkSpeed\s*=\s*nil'
-          )
-          restore_replacement = (
-              'if hum and TJ.Main.State.originalWalkSpeed ~= nil then '
-              'hum.WalkSpeed = TJ.Main.State.originalWalkSpeed end\n'
-              '                TJ.Main.State.originalWalkSpeed = nil\n'
-              '                TJ.Main.originalWalkSpeed = nil'
-          )
-          text, restore_count = restore_pattern.subn(restore_replacement, text)
-          if restore_count:
-              changes.append('walk-speed-restore')
-
-          # Fallback for declaration/reference variants.
-          if 'TJ.Main.State.originalWalkSpeed' not in text:
-              reference_pattern = re.compile(r'(?<![.\w])originalWalkSpeed(?![\w])')
-              text, ref_count = reference_pattern.subn('TJ.Main.State.originalWalkSpeed', text)
-              if ref_count:
-                  changes.append('walk-speed-reference-fallback')
-
-          forbidden = [
-              r'\bif\s+warpActive\s+and\s+not\s+isBusy\s+then\b',
-              r'\belseif\s+isBusy\s+then\b',
-              r'(?<![.\w])originalWalkSpeed(?![\w])',
+          # Safe originalWalkSpeed transformations. Never qualify a local declaration.
+          speed_rules = [
+              (r'(?<![.\w])originalWalkSpeed\s*==\s*nil', 'TJ.Main.State.originalWalkSpeed == nil', 'walk-speed-nil-read'),
+              (r'(?<![.\w])originalWalkSpeed\s*~=\s*nil', 'TJ.Main.State.originalWalkSpeed ~= nil', 'walk-speed-value-read'),
+              (r'hum\.WalkSpeed\s*=\s*(?<![.\w])originalWalkSpeed\b', 'hum.WalkSpeed = TJ.Main.State.originalWalkSpeed', 'walk-speed-restore'),
+              (r'(?<![.\w])originalWalkSpeed\s*=\s*hum\.WalkSpeed', 'TJ.Main.State.originalWalkSpeed = hum.WalkSpeed', 'walk-speed-save'),
+              (r'(?m)^(?![ \t]*local\b)(?P<i>[ \t]*)originalWalkSpeed\s*=\s*nil\s*;?', r'\g<i>TJ.Main.State.originalWalkSpeed = nil', 'walk-speed-reset'),
           ]
-          remaining = [pattern for pattern in forbidden if re.search(pattern, text)]
+          for pattern, replacement, label in speed_rules:
+              text, n = re.subn(pattern, replacement, text)
+              if n:
+                  changes.append(label)
+
+          if 'local TJ.Main.State.originalWalkSpeed' in text:
+              raise SystemExit('invalid qualified local declaration')
+
+          legacy_uses = [
+              r'(?<![.\w])originalWalkSpeed\s*==\s*nil',
+              r'(?<![.\w])originalWalkSpeed\s*~=\s*nil',
+              r'hum\.WalkSpeed\s*=\s*(?<![.\w])originalWalkSpeed\b',
+              r'(?<![.\w])originalWalkSpeed\s*=\s*hum\.WalkSpeed',
+              r'(?m)^(?![ \t]*local\b)[ \t]*originalWalkSpeed\s*=\s*nil',
+          ]
+          remaining = [pattern for pattern in legacy_uses if re.search(pattern, text)]
           if remaining:
-              raise SystemExit('legacy markers remain: ' + repr(remaining))
+              raise SystemExit('unsafe originalWalkSpeed uses remain: ' + repr(remaining))
 
           required = [
               'titleGradient.Parent = title',
@@ -170,6 +146,7 @@ jobs:
           grep -qF 'Main.State.isBusy' main.lua
           grep -qF 'TJ.Main.State.originalWalkSpeed' main.lua
           grep -qF 'end, function(_tjErr)' main.lua
+          ! grep -qF 'local TJ.Main.State.originalWalkSpeed' main.lua
           if [ -f static-check.sh ]; then bash static-check.sh main.lua; fi
 
       - name: Commit repaired main.lua
