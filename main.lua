@@ -3124,8 +3124,8 @@ local okMonster, errMonster = pcall(function()
     local MONSTER_GLIDE_SPEED = 70          -- studs/sec (applied as max step = speed * dt)
     local MONSTER_WARP_MAX_HOP = 36         -- max single hop (keep under ~40)
     local MONSTER_MOVE_COOLDOWN = 0.03      -- min seconds between position writes
-    local MONSTER_HORIZONTAL_LERP = 0.28    -- soft blend toward destination
-    local MONSTER_VERTICAL_LERP = 0.40
+    local MONSTER_HORIZONTAL_LERP = 0.18    -- soft blend toward destination (ลดกระตุก)
+    local MONSTER_VERTICAL_LERP = 0.26
     local MONSTER_GROUND_STICK = true       -- raycast ground when not dodging/orbit-bob heavy
     local MONSTER_GROUND_RAY = 14
     local MONSTER_GROUND_OFFSET = 2.2
@@ -3723,12 +3723,12 @@ local okMonster, errMonster = pcall(function()
             desiredPos = Vector3.new(desiredPos.X, gy, desiredPos.Z)
          end
       end
-      -- blend: slightly more responsive when far, softer when close
-      local farFactor = math.clamp(distance / 20, 0, 1)
-      local alphaH = math.clamp(MONSTER_HORIZONTAL_LERP + 0.10 + farFactor * 0.12, 0.14, 0.72)
+      -- blend: softer overall, less aggressive when close (ลดกระตุก)
+      local farFactor = math.clamp(distance / 28, 0, 1)
+      local alphaH = math.clamp(MONSTER_HORIZONTAL_LERP + farFactor * 0.18, 0.12, 0.58)
       local alphaV = aerial
-         and math.clamp(MONSTER_VERTICAL_LERP + 0.25, 0.2, 0.9)
-         or math.clamp(MONSTER_VERTICAL_LERP, 0.12, 0.75)
+         and math.clamp(MONSTER_VERTICAL_LERP + 0.18, 0.18, 0.72)
+         or math.clamp(MONSTER_VERTICAL_LERP + farFactor * 0.08, 0.10, 0.55)
       local blended = Vector3.new(
          from.X + (desiredPos.X - from.X) * alphaH,
          from.Y + (desiredPos.Y - from.Y) * alphaV,
