@@ -6252,7 +6252,6 @@ end
 local function corner(parent, radius)
     ui("UICorner", {CornerRadius=UDim.new(0, radius or 10)}, parent)
 end
-end
 local panel = ui("Frame", {Name="FPSBoosterPanel", Size=UDim2.fromOffset(UI_LAYOUT.PanelW, UI_LAYOUT.PanelH),
     Position=UI_LAYOUT.FPSPanel, BackgroundColor3=GREEN.dark,
     BorderSizePixel=0, Active=true, ClipsDescendants=true}, perfGui)
