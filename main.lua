@@ -3689,7 +3689,12 @@ local okMonster, errMonster = pcall(function()
     -- NOCLIP ทุกเฟรมระหว่างล็อกเป้า: Humanoid/ฟิสิกส์เปิดการชนกลับเองระหว่างรอบ 0.12 วิ
     -- จึงต้องปิดซ้ำก่อนฟิสิกส์ทุกสเต็ป ตัวละครจึงทะลุสิ่งกีดขวางระหว่างเข้าหา/ติดอยู่บนมอนสเตอร์
     local function monsterNoclipStep()
-        if not states.MonsterWarp or not monsterCurrent then return end
+        -- Noclip shares the exclusive Monster movement lease.
+        if not states.MonsterWarp or not monsterCurrent
+            or not _tjMovementController
+            or not _tjMovementController:IsOwner("MONSTER") then
+            return
+        end
         for _, part in ipairs(monsterNoclipList) do
             if part.Parent and part.CanCollide then part.CanCollide = false end
         end
@@ -3723,6 +3728,13 @@ local okMonster, errMonster = pcall(function()
       return position.Y
     end
     local function monsterSoftApply(myRoot, desiredCF, character, targetModel, dt, aerial)
+      -- Final write gate: only the active MovementController owner may move the root.
+      if not states.MonsterWarp or not _tjMovementController
+         or not _tjMovementController:IsOwner("MONSTER")
+         or not character or character ~= monsterOwner
+         or not myRoot or myRoot.Parent ~= character then
+         return false, "movement lease inactive"
+      end
       local now = os.clock()
       if now - monsterLastMoveAt < MONSTER_MOVE_COOLDOWN then
          return false, "cooldown"
