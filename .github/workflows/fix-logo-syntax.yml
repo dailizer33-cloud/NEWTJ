@@ -1,0 +1,125 @@
+name: Fix logo syntax safely
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/fix-logo-syntax.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fix-logo-syntax
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Guard current source and backup
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(wc -c < main.lua)" -ge 300000
+          git rev-parse --verify refs/remotes/origin/backup/pre-phase19
+          test "$(git rev-parse HEAD:main.lua)" = "$(git rev-parse refs/remotes/origin/backup/pre-phase19:main.lua)"
+          cp main.lua /tmp/main.lua.before-logo-fix
+
+      - name: Normalize logo syntax only
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('main.lua')
+          s = p.read_text(encoding='utf-8')
+
+          old_toggle = '''local toggleLogo = Instance.new("TextLabel", toggleDisc)
+          toggleLogo.Name = "TayJayToggleLogo"
+          toggleLogo.Size = UDim2.fromScale(1, 1); toggleLogo.BackgroundTransparency = 1
+          toggleLogo.Text = "⚡"; toggleLogo.Font = Enum.Font.GothamBlack; toggleLogo.TextSize = 40; toggleLogo.TextColor3 = Color3.fromRGB(255, 224, 70)'''
+          new_toggle = '''local toggleLogo = Instance.new("TextLabel")
+          toggleLogo.Name = "TayJayToggleLogo"
+          toggleLogo.Size = UDim2.fromScale(1, 1)
+          toggleLogo.BackgroundTransparency = 1
+          toggleLogo.Text = "⚡"
+          toggleLogo.Font = Enum.Font.GothamBlack
+          toggleLogo.TextSize = 40
+          toggleLogo.TextColor3 = Color3.fromRGB(255, 224, 70)
+          toggleLogo.Parent = toggleDisc'''
+
+          old_title = '''local title = Instance.new("TextLabel", mainFrame)
+          title.Name = "TayJayBrandTitle"; title.Size = UDim2.new(1, 0, 0, 54); title.Position = UDim2.new(0, 0, 0, 0); title.BackgroundTransparency = 1; title.Text = "TAYJAY"; title.TextColor3 = GREEN.ink; title.TextSize = 48; title.Font = Enum.Font.FredokaOne
+          -- ขอบเข้มหนาขึ้น (เดิมขอบขาวบนสีพาสเทล ทำให้ตัวอักษรกลืนกัน) เพื่อให้โลโก้อ่านชัด
+           title.TextStrokeTransparency = 1
+          local titleGradient = Instance.new("UIGradient")
+          titleGradient.Color = ColorSequence.new({
+              ColorSequenceKeypoint.new(0.00, Color3.fromRGB(255, 105, 180)),
+              ColorSequenceKeypoint.new(0.18, Color3.fromRGB(255, 190, 225)),
+              ColorSequenceKeypoint.new(0.36, Color3.fromRGB(160, 235, 255)),
+              ColorSequenceKeypoint.new(0.54, Color3.fromRGB(170, 255, 190)),
+              ColorSequenceKeypoint.new(0.72, Color3.fromRGB(255, 245, 150)),
+              ColorSequenceKeypoint.new(0.88, Color3.fromRGB(255, 175, 115)),
+              ColorSequenceKeypoint.new(1.00, Color3.fromRGB(255, 105, 180)),
+          })
+          titleGradient.Parent = title'''
+          new_title = '''local title = Instance.new("TextLabel")
+          title.Name = "TayJayBrandTitle"
+          title.Size = UDim2.new(1, 0, 0, 54)
+          title.Position = UDim2.new(0, 0, 0, 0)
+          title.BackgroundTransparency = 1
+          title.Text = "TAYJAY"
+          title.TextColor3 = GREEN.ink
+          title.TextSize = 48
+          title.Font = Enum.Font.FredokaOne
+          title.TextStrokeTransparency = 1
+          title.Parent = mainFrame
+          local titleGradient = Instance.new("UIGradient")
+          titleGradient.Color = ColorSequence.new({
+              ColorSequenceKeypoint.new(0.00, Color3.fromRGB(255, 105, 180)),
+              ColorSequenceKeypoint.new(0.18, Color3.fromRGB(255, 190, 225)),
+              ColorSequenceKeypoint.new(0.36, Color3.fromRGB(160, 235, 255)),
+              ColorSequenceKeypoint.new(0.54, Color3.fromRGB(170, 255, 190)),
+              ColorSequenceKeypoint.new(0.72, Color3.fromRGB(255, 245, 150)),
+              ColorSequenceKeypoint.new(0.88, Color3.fromRGB(255, 175, 115)),
+              ColorSequenceKeypoint.new(1.00, Color3.fromRGB(255, 105, 180))
+          })
+          titleGradient.Parent = title'''
+
+          if s.count(old_toggle) != 1:
+              raise SystemExit('toggle logo block mismatch')
+          if s.count(old_title) != 1:
+              raise SystemExit('brand title block mismatch')
+          s = s.replace(old_toggle, new_toggle, 1).replace(old_title, new_title, 1)
+          p.write_text(s, encoding='utf-8', newline='')
+          PY
+
+      - name: Validate narrow diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(wc -c < main.lua)" -ge 300000
+          grep -qF 'toggleLogo.Parent = toggleDisc' main.lua
+          grep -qF 'title.Parent = mainFrame' main.lua
+          grep -qF 'titleGradient.Parent = title' main.lua
+          test "$(git diff --numstat -- main.lua | awk '{print $1+$2}')" -le 80
+          if [ -f static-check.sh ]; then bash static-check.sh main.lua; fi
+
+      - name: Commit logo syntax repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- main.lua
+          git diff --cached --stat
+          git diff --cached --quiet && exit 0
+          git commit -m 'Fix logo construction syntax before Phase 19A'
+          git push origin HEAD:main
