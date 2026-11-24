@@ -4411,10 +4411,7 @@ trackConnection(orbitBtn.Activated:Connect(function()
     end))
     trackConnection(RunService.Heartbeat:Connect(monsterGlueStep))
     trackConnection(RunService.Stepped:Connect(monsterNoclipStep))
-    do
-        local okPre, preRender = pcall(function() return RunService.PreRender end)
-        if okPre and preRender then trackConnection(preRender:Connect(monsterGlueStep)) end
-    end
+    -- monsterGlueStep runs only on Heartbeat to avoid competing per-frame CFrame writes.
     -- Throttled scan/follow loop: no per-frame Workspace:GetDescendants() calls.
     task.spawn(function()
         local followAccumulator = 0
