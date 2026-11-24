@@ -1,0 +1,72 @@
+--- a/src/main.lua
++++ b/src/main.lua
+@@ -5133,6 +5133,13 @@
+             highlight.OutlineTransparency = 0.08
+         end
+     end
++    -- Phase 17: the normal Player ESP billboard (name + HP) belongs to states.ESP only.
++    -- MM2 Role ESP may still use the shared highlight above, but never this billboard.
++    if not states.ESP then
++        local strayBillboard = head:FindFirstChild(ESP_NAME)
++        if strayBillboard then strayBillboard:Destroy() end
++        return
++    end
+     local billboard = head:FindFirstChild(ESP_NAME)
+     if not billboard then
+         billboard = Instance.new("BillboardGui")
+@@ -5222,15 +5229,18 @@
+         for _, player in ipairs(Players:GetPlayers()) do
+             if player ~= LocalPlayer and player.Character then applyEspToCharacter(player.Character) end
+         end
+-    elseif not states.MM2RoleESP then
++    else
++        -- Phase 17: always remove the normal billboard; keep the shared highlight only while MM2 owns it.
+         for _, player in ipairs(Players:GetPlayers()) do
+             local character = player.Character
+             if character then
+-                local highlight = character:FindFirstChild(ESP_HIGHLIGHT)
+-                if highlight then highlight:Destroy() end
+                 local head = character:FindFirstChild("Head") or character.PrimaryPart
+                 local billboard = head and head:FindFirstChild(ESP_NAME)
+                 if billboard then billboard:Destroy() end
++                if not states.MM2RoleESP then
++                    local highlight = character:FindFirstChild(ESP_HIGHLIGHT)
++                    if highlight then highlight:Destroy() end
++                end
+             end
+         end
+     end
+@@ -5485,6 +5495,12 @@
+                 -- Phase 16: MM2 owns its own billboard and never reuses TayJay_PlayerESP.
+                 local adornment = character:FindFirstChild("Head") or character.PrimaryPart
+                 if adornment then
++                    -- Phase 17: drop a stray MM2 billboard if the adornment part changed (Head <-> PrimaryPart).
++                    local rootPart = character.PrimaryPart
++                    if rootPart and rootPart ~= adornment then
++                        local strayMM2 = rootPart:FindFirstChild(MM2_ROLE_ESP_NAME)
++                        if strayMM2 then strayMM2:Destroy() end
++                    end
+                     local billboard = adornment:FindFirstChild(MM2_ROLE_ESP_NAME)
+                     if not billboard then
+                         billboard = Instance.new("BillboardGui")
+@@ -5540,12 +5556,17 @@
+                     end
+                 end
+     
+-                -- Phase 16: destroy only the MM2-owned billboard.
+-                local adornment = character:FindFirstChild("Head") or character.PrimaryPart
+-                local billboard = adornment and adornment:FindFirstChild(MM2_ROLE_ESP_NAME)
++                -- Phase 16/17: destroy only the MM2-owned billboard, on Head and on PrimaryPart.
++                local head = character:FindFirstChild("Head")
++                local billboard = head and head:FindFirstChild(MM2_ROLE_ESP_NAME)
+                 if billboard then
+                     billboard:Destroy()
+                 end
++                local rootPart = character.PrimaryPart
++                local rootBillboard = rootPart and rootPart:FindFirstChild(MM2_ROLE_ESP_NAME)
++                if rootBillboard then
++                    rootBillboard:Destroy()
++                end
+             end
+         end
+     end
