@@ -5,6 +5,8 @@ on:
     branches: [phase19-rebuild]
     paths:
       - scripts/fix_phase19c_startup_sync.py
+      - scripts/verify_phase19c.py
+      - docs/PHASE19C_TRIGGER.txt
       - .github/workflows/phase19c-fix-startup-sync.yml
   workflow_dispatch:
 
@@ -22,15 +24,10 @@ jobs:
           fetch-depth: 0
       - name: Apply focused fix
         run: python3 scripts/fix_phase19c_startup_sync.py
-      - name: Verify focused invariants
+      - name: Verify Phase 19C
         run: |
-          grep -qF '"startup_repair"' main.lua
-          grep -qF 'local before = StateService:Snapshot()' main.lua
-          grep -qF 'if before[changedKey] ~= changedValue and uiSyncRegistry[changedKey] then' main.lua
-          if grep -qF 'for changedKey, changedValue in pairs(result) do' main.lua; then
-            echo 'stale full-snapshot UI sync remains' >&2
-            exit 1
-          fi
+          python3 scripts/verify_phase19c.py
+          bash static-check.sh main.lua
       - name: Commit fixes
         run: |
           if git diff --quiet -- main.lua patches/phase19c_state_service.lua; then
