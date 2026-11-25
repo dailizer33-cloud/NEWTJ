@@ -18,6 +18,15 @@ jobs:
           ref: main
           fetch-depth: 0
 
+      - name: Check if Phase 19A is already applied
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -qF 'function Main:IsBusy()' main.lua && grep -qF 'function Main:SetBusy(value, owner)' main.lua && ! grep -qF 'Main.isBusy' main.lua; then
+            echo 'Phase 19A already applied, skipping'
+            exit 0
+          fi
+
       - name: Apply Phase 19A safely
         shell: bash
         run: |
