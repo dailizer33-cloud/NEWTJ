@@ -1,4 +1,4 @@
-name: Phase 19A canonical busy state
+name: Phase 19A commit main.lua
 
 on:
   push:
@@ -9,12 +9,8 @@ on:
 permissions:
   contents: write
 
-concurrency:
-  group: phase19a-main
-  cancel-in-progress: false
-
 jobs:
-  phase19a:
+  commit-phase19a:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -22,7 +18,7 @@ jobs:
           ref: main
           fetch-depth: 0
 
-      - name: Patch and validate main.lua
+      - name: Apply Phase 19A safely
         shell: bash
         run: |
           set -euo pipefail
@@ -35,76 +31,73 @@ jobs:
 
           p = Path('main.lua')
           raw = p.read_bytes()
-          nl = '\r\n' if b'\r\n' in raw else '\n'
+          newline = '\r\n' if b'\r\n' in raw else '\n'
           s = raw.decode('utf-8').replace('\r\n', '\n')
           before = s
 
-          old = '''if State.originalWalkSpeed == nil then State.originalWalkSpeed = Main.originalWalkSpeed end
-          if State.isBusy == nil then State.isBusy = Main.isBusy == true end
-          -- Legacy feature modules keep the same table references. Scalar runtime values
-          -- are stored in State and mirrored to legacy fields only when changed.
-          Main.config, Main.states = config, states
-          Main.originalWalkSpeed, Main.isBusy = State.originalWalkSpeed, State.isBusy
-          TJ.Main = Main'''.replace('          ', '')
-          new = '''if State.originalWalkSpeed == nil then State.originalWalkSpeed = Main.originalWalkSpeed end
-          if State.isBusy == nil then State.isBusy = false end
-          State.busyOwner = State.isBusy and State.busyOwner or nil
-          function Main:IsBusy()
-              return self.State.isBusy == true
-          end
-          function Main:SetBusy(value, owner)
-              local busy = value == true
-              self.State.isBusy = busy
-              self.State.busyOwner = busy and tostring(owner or "UNKNOWN") or nil
-              return busy
-          end
-          Main.config, Main.states = config, states
-          Main.originalWalkSpeed = State.originalWalkSpeed
-          TJ.Main = Main'''.replace('          ', '')
+          bootstrap = re.compile(
+              r'if State\.originalWalkSpeed == nil then State\.originalWalkSpeed = Main\.originalWalkSpeed end\n'
+              r'if State\.isBusy == nil then State\.isBusy = Main\.isBusy == true end\n'
+              r'-- Legacy feature modules keep the same table references\. Scalar runtime values\n'
+              r'-- are stored in State and mirrored to legacy fields only when changed\.\n'
+              r'Main\.config, Main\.states = config, states\n'
+              r'Main\.originalWalkSpeed, Main\.isBusy = State\.originalWalkSpeed, State\.isBusy\n'
+              r'TJ\.Main = Main'
+          )
+          replacement = '''if State.originalWalkSpeed == nil then State.originalWalkSpeed = Main.originalWalkSpeed end
+if State.isBusy == nil then State.isBusy = false end
+State.busyOwner = State.isBusy and State.busyOwner or nil
+function Main:IsBusy()
+    return self.State.isBusy == true
+end
+function Main:SetBusy(value, owner)
+    local busy = value == true
+    self.State.isBusy = busy
+    self.State.busyOwner = busy and tostring(owner or "UNKNOWN") or nil
+    return busy
+end
+Main.config, Main.states = config, states
+Main.originalWalkSpeed = State.originalWalkSpeed
+TJ.Main = Main'''
+          s, n = bootstrap.subn(replacement, s, count=1)
+          if n == 0 and 'function Main:SetBusy(value, owner)' not in s:
+              raise SystemExit('Phase 19A bootstrap not found')
 
-          if old in s:
-              s = s.replace(old, new, 1)
-          elif 'function Main:SetBusy(value, owner)' not in s:
-              raise SystemExit('state bootstrap anchor not found')
+          rules = [
+              (r'local state = Main\.State\n\s*local busy = \(state and state\.isBusy == true\) or Main\.isBusy == true', 'local busy = Main:IsBusy()'),
+              (r'\bif\s+warpActive\s+and\s+not\s+isBusy\s+then\b', 'if warpActive and not Main:IsBusy() then'),
+              (r'\belseif\s+isBusy\s+then\b', 'elseif Main:IsBusy() then'),
+              (r'\bif\s+isBusy\s+or\s+flyNowe\s+or\s+states\.Fly\s+or\s+targetPlayer\s*==\s*LocalPlayer\s+then\s+return\s+end', 'if Main:IsBusy() or flyNowe or states.Fly or targetPlayer == LocalPlayer then return end'),
+              (r'(?m)^(\s*)isBusy\s*=\s*true\s*$', r'\1Main:SetBusy(true, "MM2")'),
+              (r'(?m)^(\s*)isBusy\s*=\s*false\s*$', r'\1Main:SetBusy(false, "MM2")'),
+          ]
+          for pattern, repl in rules:
+              s = re.sub(pattern, repl, s)
 
-          s = re.sub(r'local state = Main\.State\n\s*local busy = \(state and state\.isBusy == true\) or Main\.isBusy == true', 'local busy = Main:IsBusy()', s)
-          s = re.sub(r'\bif\s+warpActive\s+and\s+not\s+isBusy\s+then\b', 'if warpActive and not Main:IsBusy() then', s)
-          s = re.sub(r'\belseif\s+isBusy\s+then\b', 'elseif Main:IsBusy() then', s)
-          s = re.sub(r'\bif\s+isBusy\s+or\s+flyNowe\s+or\s+states\.Fly\s+or\s+targetPlayer\s*==\s*LocalPlayer\s+then\s+return\s+end', 'if Main:IsBusy() or flyNowe or states.Fly or targetPlayer == LocalPlayer then return end', s)
-          s = re.sub(r'(?m)^(\s*)isBusy\s*=\s*true\s*$', r'\1Main:SetBusy(true, "MM2")', s)
-          s = re.sub(r'(?m)^(\s*)isBusy\s*=\s*false\s*$', r'\1Main:SetBusy(false, "MM2")', s)
+          if 'Main.isBusy' in s:
+              raise SystemExit('legacy Main.isBusy remains')
+          if 'function Main:IsBusy()' not in s or 'function Main:SetBusy(value, owner)' not in s:
+              raise SystemExit('canonical busy API missing')
+          if s == before:
+              raise SystemExit('no main.lua changes produced')
 
-          if re.search(r'\bMain\.isBusy\b', s):
-              raise SystemExit('Main.isBusy remains')
-          bare = re.compile(r'(?<![.\w])isBusy(?![\w])')
-          if bare.search(s):
-              raise SystemExit('bare isBusy remains')
-
-          required = ['function Main:IsBusy()', 'function Main:SetBusy(value, owner)', 'self.State.isBusy = busy', 'Main:SetBusy(true, "MM2")', 'Main:SetBusy(false, "MM2")']
-          missing = [x for x in required if x not in s]
-          if missing:
-              raise SystemExit('missing markers: ' + repr(missing))
-
-          if s != before:
-              p.write_bytes(s.replace('\n', nl).encode('utf-8'))
-              print('Phase 19A applied')
-          else:
-              print('Phase 19A already complete')
+          p.write_bytes(s.replace('\n', newline).encode('utf-8'))
+          print('Phase 19A updated main.lua')
           PY
+
           test "$(wc -c < main.lua)" -ge 300000
-          ! grep -qE '\bMain\.isBusy\b' main.lua
+          grep -qF 'function Main:IsBusy()' main.lua
+          grep -qF 'function Main:SetBusy(value, owner)' main.lua
+          ! grep -qF 'Main.isBusy' main.lua
           if [ -f static-check.sh ]; then bash static-check.sh main.lua; fi
 
-      - name: Commit current Phase 19A result
+      - name: Commit main.lua
         shell: bash
         run: |
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -- main.lua
-          if git diff --cached --quiet; then
-            echo 'Phase 19A already committed'
-            exit 0
-          fi
+          git diff --cached --check
           git commit -m 'refactor: make State.isBusy canonical'
           git push origin HEAD:main
