@@ -435,6 +435,97 @@ end
 TJ.Main.Theme = Theme
 Main.Theme = Theme
 -- =========================================================
+-- PHASE 21: PERFORMANCE OPTIMIZATION
+-- =========================================================
+local PerformanceOptimizer = {
+    enabled = true,
+    espUpdateThrottle = 0.1,
+    lastEspUpdate = 0,
+    maxEspDistance = 200,
+    billboardPool = {},
+    poolSize = 0,
+    maxPoolSize = 50
+}
+function PerformanceOptimizer:ShouldUpdateESP()
+    if not self.enabled then return true end
+    local now = os.clock()
+    if now - self.lastEspUpdate >= self.espUpdateThrottle then
+        self.lastEspUpdate = now
+        return true
+    end
+    return false
+end
+function PerformanceOptimizer:ShouldRenderESP(distance)
+    if not self.enabled then return true end
+    return distance <= self.maxEspDistance
+end
+function PerformanceOptimizer:GetBillboardFromPool()
+    if not self.enabled then return nil end
+    if self.poolSize > 0 then
+        local billboard = table.remove(self.billboardPool, self.poolSize)
+        self.poolSize = self.poolSize - 1
+        return billboard
+    end
+    return nil
+end
+function PerformanceOptimizer:ReturnBillboardToPool(billboard)
+    if not self.enabled or not billboard then return end
+    if self.poolSize >= self.maxPoolSize then
+        billboard:Destroy()
+        return
+    end
+    billboard.Adornee = nil
+    billboard.AlwaysOnTop = true
+    billboard.LightInfluence = 0
+    billboard.MaxDistance = 500
+    billboard.Size = UDim2.new(0, 190, 0, 42)
+    billboard.StudsOffset = Vector3.new(0, 0, 0)
+    for _, child in ipairs(billboard:GetChildren()) do
+        child:Destroy()
+    end
+    table.insert(self.billboardPool, billboard)
+    self.poolSize = self.poolSize + 1
+end
+function PerformanceOptimizer:ClearPool()
+    for _, billboard in ipairs(self.billboardPool) do
+        billboard:Destroy()
+    end
+    self.billboardPool = {}
+    self.poolSize = 0
+end
+function PerformanceOptimizer:CleanupCaches()
+    self:ClearPool()
+end
+TJ.Main.PerformanceOptimizer = PerformanceOptimizer
+Main.PerformanceOptimizer = PerformanceOptimizer
+-- Optimized target selection algorithm
+function TargetService:FindNearestOptimized(maxDistance, includeTeams)
+    if type(PerformanceOptimizer) == "table" and not PerformanceOptimizer:ShouldUpdateESP() then
+        return nil, nil
+    end
+    local nearestDist = maxDistance or math.huge
+    local nearestChar = nil
+    local myChar = LocalPlayer.Character
+    if not myChar then return nil, nil end
+    local myRoot = myChar:FindFirstChild("HumanoidRootPart")
+    if not myRoot then return nil, nil end
+    local myPos = myRoot.Position
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player == LocalPlayer then continue end
+        if not includeTeams and player.Team and LocalPlayer.Team and player.Team == LocalPlayer.Team then continue end
+        local char = player.Character
+        if not char then continue end
+        local root = char:FindFirstChild("HumanoidRootPart")
+        if not root then continue end
+        local dist = (root.Position - myPos).Magnitude
+        if dist < nearestDist then
+            nearestDist = dist
+            nearestChar = char
+        end
+    end
+    return nearestDist, nearestChar
+end
+-- =========================================================
 -- TAYJAY RESOURCE MANAGER V2 — PERSISTENT MONITOR MODE
 -- Observes declared writes only. It never acquires, blocks, preempts,
 -- or changes the behavior of a registered feature.
@@ -704,6 +795,18 @@ if config.AimAssistStrength == nil then config.AimAssistStrength = 0.3 end
 if config.AutoFarmRange == nil then config.AutoFarmRange = 50 end
 if config.TeleportDistance == nil then config.TeleportDistance = 100 end
 if config.AutoCollectRange == nil then config.AutoCollectRange = 10 end
+-- Phase 21: Performance Optimization configs
+if config.EspUpdateThrottle == nil then config.EspUpdateThrottle = 0.1 end
+if config.MaxEspDistance == nil then config.MaxEspDistance = 200 end
+if config.MaxPoolSize == nil then config.MaxPoolSize = 50 end
+-- Phase 22: Advanced Features configs
+if config.AutoPotionHealthThreshold == nil then config.AutoPotionHealthThreshold = 0.5 end
+if config.AutoQuestRange == nil then config.AutoQuestRange = 100 end
+if config.TeamSupportRange == nil then config.TeamSupportRange = 20 end
+-- Phase 23: Testing & Bug Fixes configs
+if config.TestingEnabled == nil then config.TestingEnabled = true end
+if config.BugDetectionEnabled == nil then config.BugDetectionEnabled = true end
+if config.BenchmarkEnabled == nil then config.BenchmarkEnabled = true end
 local states = Main.states
 if type(states) ~= "table" then states = {}; Main.states = states end
 local defaults = {
@@ -711,7 +814,13 @@ local defaults = {
     Xray = false, ESP = true, DeathNote = false, KillAura = false,
     NormalKillAura = false, MonsterWarp = false, ServerSelector = false,
     MM2RoleESP = false, AutoWarp = false, DNWarp = false,
-    AutoFarm = false, Teleport = false, AimAssist = false, AutoCollect = false
+    AutoFarm = false, Teleport = false, AimAssist = false, AutoCollect = false,
+    -- Phase 21: Performance Optimization
+    PerformanceMode = false,
+    -- Phase 22: Advanced Features
+    AutoPotion = false, AutoQuest = false, TeamFeatures = false,
+    -- Phase 23: Testing & Bug Fixes
+    RuntimeTesting = false, BugDetection = false, PerformanceBenchmark = false
 }
 for key, value in pairs(defaults) do
     if states[key] == nil then states[key] = value end
@@ -5200,6 +5309,15 @@ local settingsBtnSize = Instance.new("UITextSizeConstraint", settingsBtn)
 settingsBtnSize.MaxTextSize = 14
 settingsBtnSize.MinTextSize = 9
 Instance.new("UICorner", settingsBtn).CornerRadius = UDim.new(0, 11)
+trackConnection(settingsBtn.Activated:Connect(function() settingsPanel.Visible = not settingsPanel.Visible end))
+-- Phase 21-23 UI Buttons
+createBtn(15, "15. \u26a1 Performance Mode", "PerformanceMode")
+createBtn(16, "16. \u2764 Auto-Potion", "AutoPotion")
+createBtn(17, "17. \ud83c\udf96 Auto-Quest", "AutoQuest")
+createBtn(18, "18. \ud83d\udc6b Team Features", "TeamFeatures")
+createBtn(19, "19. \ud83d\udd2c Runtime Testing", "RuntimeTesting")
+createBtn(20, "20. \ud83d\udc1b Bug Detection", "BugDetection")
+createBtn(21, "21. \u26a1 Performance Benchmark", "PerformanceBenchmark")
 -- Settings Panel
 local settingsPanel = Instance.new("Frame", screenGui)
 settingsPanel.Name = "TayJaySettingsPanel"
@@ -5311,11 +5429,14 @@ createConfigSlider(120, "Auto-Farm Range: ", "AutoFarmRange", 10, 100, 50)
 createConfigSlider(190, "Teleport Distance: ", "TeleportDistance", 20, 200, 100)
 createConfigSlider(260, "Auto-Collect Range: ", "AutoCollectRange", 5, 50, 10)
 createConfigSlider(330, "Aim Assist Strength: ", "AimAssistStrength", 0.1, 1, 0.3)
+-- Phase 22-23 Config Sliders
+createConfigSlider(400, "Auto-Potion Health %: ", "AutoPotionHealthThreshold", 10, 100, 50)
+createConfigSlider(470, "Auto-Quest Range: ", "AutoQuestRange", 10, 200, 100)
+createConfigSlider(540, "Team Support Range: ", "TeamSupportRange", 5, 50, 20)
 
-trackConnection(settingsBtn.Activated:Connect(function() settingsPanel.Visible = not settingsPanel.Visible end))
 local stopAllButton = Instance.new("TextButton", scroll)
 stopAllButton.Name = "TayJayStopAllButton"
-stopAllButton.LayoutOrder = 15
+stopAllButton.LayoutOrder = 22
 stopAllButton.Size = UDim2.new(1, -4, 0, 38)
 stopAllButton.BackgroundColor3 = Color3.fromRGB(176, 36, 48)
 stopAllButton.Text = "STOP ALL"
@@ -5568,7 +5689,15 @@ local FeatureWhitelist = {
         AutoFarm = true,
         Teleport = true,
         AimAssist = true,
-        AutoCollect = true
+        AutoCollect = true,
+        -- Phase 21-23 Features
+        PerformanceMode = true,
+        AutoPotion = true,
+        AutoQuest = true,
+        TeamFeatures = true,
+        RuntimeTesting = true,
+        BugDetection = true,
+        PerformanceBenchmark = true
     }
 }
 function FeatureWhitelist:IsAllowed(featureName)
@@ -5650,6 +5779,285 @@ if AntiDetection.randomizeIntervals then
         return originalRunServiceHeartbeat
     end
 end
+-- =========================================================
+-- PHASE 22: ADVANCED FEATURES
+-- =========================================================
+-- Auto-Potion System
+local autoPotionEnabled = false
+local autoPotionConnection = nil
+local function startAutoPotion()
+    if autoPotionEnabled then return end
+    autoPotionEnabled = true
+    if autoPotionConnection then autoPotionConnection:Disconnect() end
+    autoPotionConnection = RunService.Heartbeat:Connect(function()
+        if not states.AutoPotion or not autoPotionEnabled then return end
+        local char = LocalPlayer.Character
+        if not char then return end
+        local humanoid = char:FindFirstChildOfClass("Humanoid")
+        if not humanoid then return end
+        -- Check health and use potion if low
+        if humanoid.Health > 0 and humanoid.Health < humanoid.MaxHealth * 0.5 then
+            -- Find potion in inventory
+            local backpack = LocalPlayer:FindFirstChildOfClass("Backpack")
+            if backpack then
+                for _, item in ipairs(backpack:GetChildren()) do
+                    if item.Name:lower():find("potion") or item.Name:lower():find("health") then
+                        -- Use the potion
+                        pcall(function()
+                            item:FindFirstChildWhichIsA("RemoteEvent"):FireServer()
+                        end)
+                        break
+                    end
+                end
+            end
+        end
+    end)
+end
+local function stopAutoPotion()
+    autoPotionEnabled = false
+    if autoPotionConnection then
+        autoPotionConnection:Disconnect()
+        autoPotionConnection = nil
+    end
+end
+registerUiSync("AutoPotion", function(isOn)
+    if isOn then
+        startAutoPotion()
+    else
+        stopAutoPotion()
+    end
+end)
+-- Auto-Quest System
+local autoQuestEnabled = false
+local autoQuestConnection = nil
+local currentQuestTarget = nil
+local function startAutoQuest()
+    if autoQuestEnabled then return end
+    autoQuestEnabled = true
+    if autoQuestConnection then autoQuestConnection:Disconnect() end
+    autoQuestConnection = RunService.Heartbeat:Connect(function()
+        if not states.AutoQuest or not autoQuestEnabled then
+            currentQuestTarget = nil
+            return
+        end
+        -- Find quest targets
+        if type(TargetService) == "table" then
+            local _, target = TargetService:FindNearestOptimized(100, false)
+            if target then
+                currentQuestTarget = target
+                -- Move towards target or perform quest action
+                if type(TargetService._questFn) == "function" then
+                    pcall(TargetService._questFn, target)
+                end
+            end
+        end
+    end)
+end
+local function stopAutoQuest()
+    autoQuestEnabled = false
+    currentQuestTarget = nil
+    if autoQuestConnection then
+        autoQuestConnection:Disconnect()
+        autoQuestConnection = nil
+    end
+end
+registerUiSync("AutoQuest", function(isOn)
+    if isOn then
+        startAutoQuest()
+    else
+        stopAutoQuest()
+    end
+end)
+-- Team-based Features
+local teamFeaturesEnabled = false
+local teamConnection = nil
+local function startTeamFeatures()
+    if teamFeaturesEnabled then return end
+    teamFeaturesEnabled = true
+    if teamConnection then teamConnection:Disconnect() end
+    teamConnection = RunService.Heartbeat:Connect(function()
+        if not states.TeamFeatures or not teamFeaturesEnabled then return end
+        local char = LocalPlayer.Character
+        if not char then return end
+        local myRoot = char:FindFirstChild("HumanoidRootPart")
+        if not myRoot then return end
+        -- Find team members and provide assistance
+        local myTeam = LocalPlayer.Team
+        if myTeam then
+            for _, player in ipairs(Players:GetPlayers()) do
+                if player == LocalPlayer then continue end
+                if player.Team == myTeam then
+                    local teamChar = player.Character
+                    if teamChar then
+                        local teamRoot = teamChar:FindFirstChild("HumanoidRootPart")
+                        if teamRoot then
+                            local dist = (teamRoot.Position - myRoot.Position).Magnitude
+                            -- Heal or buff team members in range
+                            if dist < 20 then
+                                -- Team support logic
+                                pcall(function()
+                                    if type(TargetService._teamSupportFn) == "function" then
+                                        TargetService._teamSupportFn(player)
+                                    end
+                                end)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end)
+end
+local function stopTeamFeatures()
+    teamFeaturesEnabled = false
+    if teamConnection then
+        teamConnection:Disconnect()
+        teamConnection = nil
+    end
+end
+registerUiSync("TeamFeatures", function(isOn)
+    if isOn then
+        startTeamFeatures()
+    else
+        stopTeamFeatures()
+    end
+end)
+-- =========================================================
+-- PHASE 23: TESTING & BUG FIXES
+-- =========================================================
+-- Testing Framework
+local TestingFramework = {
+    enabled = true,
+    tests = {},
+    results = {}
+}
+function TestingFramework:AddTest(name, testFn)
+    self.tests[name] = testFn
+end
+function TestingFramework:RunTest(name)
+    if not self.enabled then return false, "Testing disabled" end
+    local testFn = self.tests[name]
+    if not testFn then return false, "Test not found" end
+    local success, result = pcall(testFn)
+    self.results[name] = {success = success, result = result, timestamp = os.clock()}
+    return success, result
+end
+function TestingFramework:RunAllTests()
+    if not self.enabled then return {} end
+    local allResults = {}
+    for name, testFn in pairs(self.tests) do
+        local success, result = self:RunTest(name)
+        allResults[name] = {success = success, result = result}
+    end
+    return allResults
+end
+function TestingFramework:GetResults()
+    return self.results
+end
+function TestingFramework:ClearResults()
+    self.results = {}
+end
+TJ.Main.TestingFramework = TestingFramework
+Main.TestingFramework = TestingFramework
+-- Bug Detector
+local BugDetector = {
+    enabled = true,
+    errors = {},
+    maxErrors = 100
+}
+function BugDetector:LogError(errorMsg, context)
+    if not self.enabled then return end
+    local errorEntry = {
+        message = errorMsg,
+        context = context,
+        timestamp = os.clock(),
+        count = 1
+    }
+    table.insert(self.errors, errorEntry)
+    if #self.errors > self.maxErrors then
+        table.remove(self.errors, 1)
+    end
+end
+function BugDetector:GetErrors()
+    return self.errors
+end
+function BugDetector:ClearErrors()
+    self.errors = {}
+end
+function BugDetector:CheckForCommonIssues()
+    if not self.enabled then return {} end
+    local issues = {}
+    -- Check for nil references
+    pcall(function()
+        if not LocalPlayer then table.insert(issues, "LocalPlayer is nil") end
+        if not LocalPlayer.Character then table.insert(issues, "LocalPlayer.Character is nil") end
+    end)
+    return issues
+end
+TJ.Main.BugDetector = BugDetector
+Main.BugDetector = BugDetector
+-- Performance Benchmark
+local PerformanceBenchmark = {
+    enabled = true,
+    benchmarks = {},
+    history = {}
+}
+function PerformanceBenchmark:Start(name)
+    if not self.enabled then return end
+    self.benchmarks[name] = {start = os.clock(), frames = 0}
+end
+function PerformanceBenchmark:MarkFrame(name)
+    if not self.enabled or not self.benchmarks[name] then return end
+    self.benchmarks[name].frames = self.benchmarks[name].frames + 1
+end
+function PerformanceBenchmark:End(name)
+    if not self.enabled or not self.benchmarks[name] then return 0 end
+    local benchmark = self.benchmarks[name]
+    local elapsed = os.clock() - benchmark.start
+    local fps = benchmark.frames / (elapsed > 0 and elapsed or 1)
+    local result = {
+        name = name,
+        elapsed = elapsed,
+        frames = benchmark.frames,
+        fps = fps,
+        timestamp = os.clock()
+    }
+    table.insert(self.history, result)
+    self.benchmarks[name] = nil
+    return fps
+end
+function PerformanceBenchmark:GetHistory()
+    return self.history
+end
+function PerformanceBenchmark:ClearHistory()
+    self.history = {}
+end
+function PerformanceBenchmark:GetAverageFPS()
+    if not self.enabled or #self.history == 0 then return 0 end
+    local total = 0
+    for _, entry in ipairs(self.history) do
+        total = total + entry.fps
+    end
+    return total / #self.history
+end
+TJ.Main.PerformanceBenchmark = PerformanceBenchmark
+Main.PerformanceBenchmark = PerformanceBenchmark
+-- =========================================================
+-- PHASE 21: Performance Mode Toggle
+-- =========================================================
+local performanceModeEnabled = false
+local function togglePerformanceMode(isOn)
+    performanceModeEnabled = isOn
+    if type(PerformanceOptimizer) == "table" then
+        PerformanceOptimizer.enabled = isOn
+        if isOn then
+            PerformanceOptimizer:CleanupCaches()
+        end
+    end
+end
+registerUiSync("PerformanceMode", function(isOn)
+    togglePerformanceMode(isOn)
+end)
 TJ.Main._TayJayLogicInit()
 TJ.Main._TayJayLogicInit = nil
 TJ.Main._TayJayPlayerESPInit = function()
