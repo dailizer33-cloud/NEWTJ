@@ -1,0 +1,42 @@
+name: Phase 19C integrate StateService
+
+on:
+  push:
+    branches: [phase19-rebuild]
+    paths:
+      - scripts/apply_phase19c.py
+      - patches/phase19c_state_service.lua
+      - .github/workflows/phase19c-integrate.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: phase19-rebuild
+          fetch-depth: 0
+      - name: Apply Phase 19C
+        run: python3 scripts/apply_phase19c.py
+      - name: Structural assertions
+        run: |
+          grep -qF 'TAYJAY STATE SERVICE V1 (PHASE 19C)' main.lua
+          grep -qF 'local StateService = installPhase19CStateService(Main, states)' main.lua
+          grep -qF 'StateService:Apply({ KillAura = false, DNWarp = false, AutoWarp = false }, "warp_stop_now")' main.lua
+          grep -qF 'StateService:Transition("MonsterWarp", true, "monster_start")' main.lua
+      - name: Commit integrated main
+        run: |
+          if git diff --quiet -- main.lua; then
+            echo 'No main.lua changes required'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add main.lua
+          git commit -m 'Phase 19C: integrate StateService and migrate state writers'
+          git push origin HEAD:phase19-rebuild
