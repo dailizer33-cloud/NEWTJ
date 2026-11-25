@@ -1,1 +1,1 @@
-PLACEHOLDER
+-- Recovery required: prior write accidentally replaced the file. Restore from commit 82823cb11afa2e537cf55f4159f4e10f5e260085 before applying patches.
