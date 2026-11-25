@@ -1,0 +1,94 @@
+--- a/main.lua
++++ b/main.lua
+@@ -528,6 +528,20 @@
+ -- =========================================================
+ -- PHASE 20B: THEME SYSTEM
+ -- =========================================================
++-- [TAYJAY 18.4 FIX] TJ / Main were used here before being declared (nil on first run).
++local _tjEarlyTJ = (function()
++    local env = _G
++    pcall(function()
++        if type(getgenv) == "function" then
++            local shared = getgenv()
++            if type(shared) == "table" then env = shared end
++        end
++    end)
++    if type(env.TJ) ~= "table" then env.TJ = {} end
++    if type(env.TJ.Main) ~= "table" then env.TJ.Main = {} end
++    if type(env.TJ.TargetService) ~= "table" then env.TJ.TargetService = {} end
++    return env.TJ
++end)()
+ local Theme = {
+     current = "Dark",
+     colors = {
+@@ -573,8 +587,7 @@
+ function Theme:GetCurrent()
+     return self.current, self:Get(self.current)
+ end
+-TJ.Main.Theme = Theme
+-Main.Theme = Theme
++_tjEarlyTJ.Main.Theme = Theme
+ -- =========================================================
+ -- PHASE 21: PERFORMANCE OPTIMIZATION
+ -- =========================================================
+@@ -637,10 +650,9 @@
+ function PerformanceOptimizer:CleanupCaches()
+     self:ClearPool()
+ end
+-TJ.Main.PerformanceOptimizer = PerformanceOptimizer
+-Main.PerformanceOptimizer = PerformanceOptimizer
++_tjEarlyTJ.Main.PerformanceOptimizer = PerformanceOptimizer
+ -- Optimized target selection algorithm
+-function TargetService:FindNearestOptimized(maxDistance, includeTeams)
++function _tjEarlyTJ.TargetService:FindNearestOptimized(maxDistance, includeTeams)
+     if type(PerformanceOptimizer) == "table" and not PerformanceOptimizer:ShouldUpdateESP() then
+         return nil, nil
+     end
+@@ -1780,7 +1792,8 @@
+     if not hum or not character or character ~= LocalPlayer.Character then return end
+     -- A single stable Owner is recreated for each current character.
+     stopMyHpOwner("character_replaced")
+-    local owner = ResourceManager:CreateOwner("MyHP", function()
++    local owner
++    owner = ResourceManager:CreateOwner("MyHP", function()
+         if myHpOwner == owner then
+             myHpOwner = nil
+             myHpCharacter = nil
+@@ -5329,8 +5342,9 @@
+ list.CellSize = UDim2.new(1, -4, 0, 34)
+ list.CellPadding = UDim2.fromOffset(0, 5)
+ list.FillDirectionMaxCells = 1
++local createBtn -- [TAYJAY 18.4 FIX] visible to createBtn(9..21) after the block
+ do -- [TAYJAY LOCAL-LIMIT FIX 8/8]
+-local function createBtn(order, text, key)
++function createBtn(order, text, key)
+     local btn = Instance.new("TextButton", scroll)
+     btn.Size = UDim2.new(1, -4, 0, 34); btn.BackgroundColor3 = GREEN.off; btn.Text = text .. " : OFF"; btn.TextColor3 = WHITE_TEXT; btn.Font = Enum.Font.GothamBold; btn.LayoutOrder = order
+     btn.TextScaled = true; btn.TextWrapped = false
+@@ -5429,7 +5443,8 @@
+     -- Apply theme to main menu
+     local colors = Theme:Get()
+     mainFrame.BackgroundColor3 = colors.panel
+-    title.TextColor3 = colors.text
++    local _tjBrandTitle = mainFrame:FindFirstChild("TayJayBrandTitle")
++    if _tjBrandTitle then _tjBrandTitle.TextColor3 = colors.text end
+     scroll.ScrollBarImageColor3 = colors.accent
+     for _, child in ipairs(scroll:GetChildren()) do
+         if child:IsA("TextButton") and child.Name ~= "TayJayThemeToggle" then
+@@ -5455,6 +5470,7 @@
+ settingsBtnSize.MaxTextSize = 14
+ settingsBtnSize.MinTextSize = 9
+ Instance.new("UICorner", settingsBtn).CornerRadius = UDim.new(0, 11)
++local settingsPanel -- [TAYJAY 18.4 FIX] declared before the click handler uses it
+ trackConnection(settingsBtn.Activated:Connect(function() settingsPanel.Visible = not settingsPanel.Visible end))
+ -- Phase 21-23 UI Buttons
+ createBtn(15, "15. \u{26A1} Performance Mode", "PerformanceMode")
+@@ -5465,7 +5481,7 @@
+ createBtn(20, "20. \u{1F41B} Bug Detection", "BugDetection")
+ createBtn(21, "21. \u{26A1} Performance Benchmark", "PerformanceBenchmark")
+ -- Settings Panel
+-local settingsPanel = Instance.new("Frame", screenGui)
++settingsPanel = Instance.new("Frame", screenGui)
+ settingsPanel.Name = "TayJaySettingsPanel"
+ settingsPanel.Size = UDim2.new(0, 300, 0, 400)
+ settingsPanel.Position = UDim2.new(0.5, -150, 0.5, -200)
