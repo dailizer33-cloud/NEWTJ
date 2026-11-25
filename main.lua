@@ -3659,26 +3659,13 @@ local okMonster, errMonster = pcall(function()
         end
     end
     -- ปิดการชนของตัวละครตัวเองระหว่างติดตาม: ไม่งั้นตัวมอนสเตอร์ดัน/ชนตัวละคร แล้วโดนดึงกลับทุกครั้ง = กระตุก
+    -- monsterNoclipStep disabled: removed from monster table (no collision strip)
     local function monsterDisableCollision(character)
-        local list = {}
-        for _, part in ipairs(character:GetDescendants()) do
-            if part:IsA("BasePart") then
-                table.insert(list, part)
-                if part.CanCollide then
-                    monsterCollisionSaved[part] = true
-                    part.CanCollide = false
-                end
-            end
-        end
-        monsterNoclipList = list
+        -- no-op: do not disable collision while farming monsters
+        monsterNoclipList = {}
     end
-    -- NOCLIP ทุกเฟรมระหว่างล็อกเป้า: Humanoid/ฟิสิกส์เปิดการชนกลับเองระหว่างรอบ 0.12 วิ
-    -- จึงต้องปิดซ้ำก่อนฟิสิกส์ทุกสเต็ป ตัวละครจึงทะลุสิ่งกีดขวางระหว่างเข้าหา/ติดอยู่บนมอนสเตอร์
     local function monsterNoclipStep()
-        if not states.MonsterWarp or not monsterCurrent then return end
-        for _, part in ipairs(monsterNoclipList) do
-            if part.Parent and part.CanCollide then part.CanCollide = false end
-        end
+        -- no-op
     end
     local function monsterRestoreCollision()
         for part in pairs(monsterCollisionSaved) do
@@ -3746,7 +3733,7 @@ local okMonster, errMonster = pcall(function()
       end
       return hum
     end
-    local function monsterSoftApply(myRoot, desiredCF, character, targetModel, dt, aerial)
+    local function monsterSoftApply(myRoot, desiredCF, character, targetModel, dt, aerial, allowWarp)
       local now = os.clock()
       dt = tonumber(dt) or 0.016
       if dt <= 0 then dt = 0.016 elseif dt > 0.1 then dt = 0.1 end
@@ -3780,7 +3767,8 @@ local okMonster, errMonster = pcall(function()
          return true, distance
       end
 
-      if horizDist > MONSTER_FAR_HOP then
+      -- FAR hop only for boss/event (WARP_BOSS_EVENT_ONLY); normal mobs use joystick only
+      if allowWarp and horizDist > MONSTER_FAR_HOP then
          if now - monsterLastMoveAt < MONSTER_MOVE_COOLDOWN then
             return false, "cooldown"
          end
@@ -3915,7 +3903,14 @@ local okMonster, errMonster = pcall(function()
       end
       MonsterMove:SetState(moveState, target.name or moveState)
       local aerial = (moveState == "DODGING")
-      monsterSoftApply(myRoot, destination, character, target.model, dt, aerial)
+      local allowWarp = isBoss
+        or (type(target.reason) == "string" and string.find(string.lower(target.reason), "event", 1, true) ~= nil)
+        or (type(target.name) == "string" and (
+              string.find(string.lower(target.name), "boss", 1, true) ~= nil
+              or string.find(string.lower(target.name), "event", 1, true) ~= nil
+              or string.find(string.lower(target.name), "queen", 1, true) ~= nil
+           ))
+      monsterSoftApply(myRoot, destination, character, target.model, dt, aerial, allowWarp)
       monsterLastRoot = targetRoot
     end
     stopMonsterWarp = function(returnHome)
@@ -4079,10 +4074,10 @@ local okMonster, errMonster = pcall(function()
 
 
     local farmOrbTouchAt = 0
+    -- WARP_BOSS_EVENT_ONLY: warp-collect only event/boss-related pickups
     local FARM_LOOT_KEYWORDS = {
-        "orb", "acorn", "buff", "event", "power", "xp", "energy", "glow",
-        "capsule", "pickup", "token", "shard", "fruit", "apple", "nut",
-        "boost", "gift", "chest", "drop", "reward", "crystal", "gem",
+        "event", "boss", "queen", "raid", "worldboss", "world boss",
+        "limited", "special event", "boss drop", "boss orb",
     }
     local function farmIsLootName(name)
         local n = string.lower(tostring(name or ""))
@@ -4091,7 +4086,7 @@ local okMonster, errMonster = pcall(function()
         end
         return false
     end
-    -- Warp-collect: hop to nearby orb/acorn/buff/event then touch
+    -- Warp-collect: hop ONLY to event/boss-related loot then touch
     local function farmWarpCollectLoot()
         local character = LocalPlayer.Character
         if not character then return end
@@ -4152,15 +4147,24 @@ local okMonster, errMonster = pcall(function()
         farmOrbTouchAt = now
     end
     task.spawn(function()
+        -- Fire skills whenever ready (cooldowns enforced inside skillFire*)
         local nextBite, nextMove = 0, 0
         while screenGui.Parent and not _G.TAYJAY_STOPPED do
             if states.MonsterWarp and monsterFilterMode == "Monster" then
                 local now = os.clock()
                 if now >= nextBite then
-                    if skillFireBite(nil) then nextBite = now + 0.62 else nextBite = now + 0.2 end
+                    if skillFireBite(nil) then
+                        nextBite = now + 0.62
+                    else
+                        nextBite = now + 0.05  -- retry soon until ready
+                    end
                 end
                 if now >= nextMove then
-                    if skillFireMoveAtTarget() then nextMove = now + 10.5 else nextMove = now + 1 end
+                    if skillFireMoveAtTarget() then
+                        nextMove = now + 10.5
+                    else
+                        nextMove = now + 0.15  -- poll until Move skill ready
+                    end
                 end
                 farmWarpCollectLoot()
             end
@@ -4570,7 +4574,7 @@ trackConnection(orbitBtn.Activated:Connect(function()
         end)
     end))
     trackConnection(RunService.Heartbeat:Connect(monsterGlueStep))
-    trackConnection(RunService.Stepped:Connect(monsterNoclipStep))
+    -- trackConnection(RunService.Stepped:Connect(monsterNoclipStep)) -- removed: no monster noclip
     do
         local okPre, preRender = pcall(function() return RunService.PreRender end)
         if okPre and preRender then trackConnection(preRender:Connect(monsterGlueStep)) end
