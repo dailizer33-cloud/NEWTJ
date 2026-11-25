@@ -28,7 +28,10 @@ jobs:
           echo "main.lua bytes=$bytes lines=$lines sha1=$sha1"
           test "$bytes" -ge 300000
           test "$lines" -ge 6000
-          ! grep -qF 'main.lua recovery pending' main.lua
+          if grep -qF 'main.lua recovery pending' main.lua; then
+            echo 'main.lua still contains the recovery placeholder' >&2
+            exit 1
+          fi
 
       - name: Phase 2 - structural validation
         run: bash static-check.sh main.lua
