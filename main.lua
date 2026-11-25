@@ -5398,17 +5398,17 @@ trackConnection(monsterMenuButton.Activated:Connect(function()
 end))
 refreshMonsterMenuButton()
 end -- [/TAYJAY LOCAL-LIMIT FIX 8/8]
-createBtn(9, "9. \u267f Auto-Farm", "AutoFarm")
-createBtn(10, "10. \ud83d\udc00 Teleport", "Teleport")
-createBtn(11, "11. \ud83c\udfaf Aim Assist", "AimAssist")
-createBtn(12, "12. \ud83d\udc1f Auto-Collect", "AutoCollect")
+createBtn(9, "9. \u{267F} Auto-Farm", "AutoFarm")
+createBtn(10, "10. \u{1F400} Teleport", "Teleport")
+createBtn(11, "11. \u{1F3AF} Aim Assist", "AimAssist")
+createBtn(12, "12. \u{1F41F} Auto-Collect", "AutoCollect")
 -- Theme Toggle Button
 local themeBtn = Instance.new("TextButton", scroll)
 themeBtn.Name = "TayJayThemeToggle"
 themeBtn.LayoutOrder = 13
 themeBtn.Size = UDim2.new(1, -4, 0, 34)
 themeBtn.BackgroundColor3 = GREEN.on
-themeBtn.Text = "13. \ud83c\udf03 Theme: DARK"
+themeBtn.Text = "13. \u{1F303} Theme: DARK"
 themeBtn.TextColor3 = WHITE_TEXT
 themeBtn.Font = Enum.Font.GothamBold
 themeBtn.TextScaled = true
@@ -5420,7 +5420,7 @@ themeBtnSize.MinTextSize = 9
 Instance.new("UICorner", themeBtn).CornerRadius = UDim.new(0, 11)
 local function updateThemeBtn()
     local currentTheme = Theme.current or "Dark"
-    themeBtn.Text = "13. \ud83c\udf03 Theme: " .. string.upper(currentTheme)
+    themeBtn.Text = "13. \u{1F303} Theme: " .. string.upper(currentTheme)
     themeBtn.BackgroundColor3 = (currentTheme == "Dark") and GREEN.on or GREEN.off
 end
 trackConnection(themeBtn.Activated:Connect(function()
@@ -5445,7 +5445,7 @@ settingsBtn.Name = "TayJaySettingsButton"
 settingsBtn.LayoutOrder = 14
 settingsBtn.Size = UDim2.new(1, -4, 0, 34)
 settingsBtn.BackgroundColor3 = GREEN.off
-settingsBtn.Text = "14. \u2699 Settings"
+settingsBtn.Text = "14. \u{2699} Settings"
 settingsBtn.TextColor3 = WHITE_TEXT
 settingsBtn.Font = Enum.Font.GothamBold
 settingsBtn.TextScaled = true
@@ -5457,13 +5457,13 @@ settingsBtnSize.MinTextSize = 9
 Instance.new("UICorner", settingsBtn).CornerRadius = UDim.new(0, 11)
 trackConnection(settingsBtn.Activated:Connect(function() settingsPanel.Visible = not settingsPanel.Visible end))
 -- Phase 21-23 UI Buttons
-createBtn(15, "15. \u26a1 Performance Mode", "PerformanceMode")
-createBtn(16, "16. \u2764 Auto-Potion", "AutoPotion")
-createBtn(17, "17. \ud83c\udf96 Auto-Quest", "AutoQuest")
-createBtn(18, "18. \ud83d\udc6b Team Features", "TeamFeatures")
-createBtn(19, "19. \ud83d\udd2c Runtime Testing", "RuntimeTesting")
-createBtn(20, "20. \ud83d\udc1b Bug Detection", "BugDetection")
-createBtn(21, "21. \u26a1 Performance Benchmark", "PerformanceBenchmark")
+createBtn(15, "15. \u{26A1} Performance Mode", "PerformanceMode")
+createBtn(16, "16. \u{2764} Auto-Potion", "AutoPotion")
+createBtn(17, "17. \u{1F396} Auto-Quest", "AutoQuest")
+createBtn(18, "18. \u{1F46B} Team Features", "TeamFeatures")
+createBtn(19, "19. \u{1F52C} Runtime Testing", "RuntimeTesting")
+createBtn(20, "20. \u{1F41B} Bug Detection", "BugDetection")
+createBtn(21, "21. \u{26A1} Performance Benchmark", "PerformanceBenchmark")
 -- Settings Panel
 local settingsPanel = Instance.new("Frame", screenGui)
 settingsPanel.Name = "TayJaySettingsPanel"
@@ -5492,7 +5492,7 @@ settingsTitle.Name = "Title"
 settingsTitle.Size = UDim2.new(1, 0, 0, 40)
 settingsTitle.Position = UDim2.new(0, 0, 0, 0)
 settingsTitle.BackgroundTransparency = 1
-settingsTitle.Text = "\u2699 CUSTOMIZATION"
+settingsTitle.Text = "\u{2699} CUSTOMIZATION"
 settingsTitle.TextColor3 = GREEN.neon
 settingsTitle.TextSize = 20
 settingsTitle.Font = Enum.Font.GothamBold
@@ -5877,7 +5877,7 @@ function ConfigEncryption:Encrypt(value)
     for i = 1, #value do
         local char = value:sub(i, i)
         local keyChar = self.key:sub((i-1) % #self.key + 1, (i-1) % #self.key + 1)
-        local encryptedChar = string.char(string.byte(char) ~ string.byte(keyChar))
+        local encryptedChar = string.char(bit32.bxor(string.byte(char), string.byte(keyChar)))
         encrypted = encrypted .. encryptedChar
     end
     return encrypted
