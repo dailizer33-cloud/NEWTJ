@@ -3121,7 +3121,7 @@ local okMonster, errMonster = pcall(function()
     local MONSTER_ORBIT_BOB = 0.8      -- แกว่งขึ้น-ลง (studs)
     local MONSTER_ENTER_SECONDS = 0.6  -- เข้า "สิงร่าง" (อยู่กลางตัวมอนสเตอร์) ก่อน แล้วค่อยขยายวงออกถึงรัศมีเต็มในเวลานี้
     -- SAFE MOVEMENT (anti-kick): soft glide + hop clamp + optional ground stick
-    local MONSTER_GLIDE_SPEED = 70          -- studs/sec (applied as max step = speed * dt)
+    local MONSTER_GLIDE_SPEED = math.random(70, 100) -- studs/sec (applied as max step = speed * dt)
     local MONSTER_WARP_MAX_HOP = 36         -- max single hop (keep under ~40)
     local MONSTER_MOVE_COOLDOWN = 0.03      -- min seconds between position writes
     local MONSTER_HORIZONTAL_LERP = 0.18    -- soft blend toward destination (ลดกระตุก)
@@ -4021,10 +4021,7 @@ local okMonster, errMonster = pcall(function()
             setMonsterPanelStatus("👾 MONSTER WARP: WAIT", "ไม่พบตัวละครที่พร้อมใช้งาน", 0, 1)
             return
         end
-        monsterSavedWalkSpeed = humanoid.WalkSpeed
         monsterSpeedCharacter = character
-        monsterAppliedWalkSpeed = math.random(60, 80)
-        humanoid.WalkSpeed = monsterAppliedWalkSpeed
         states.MonsterWarp = true
         monsterHome = root.CFrame
         monsterOwner = character
