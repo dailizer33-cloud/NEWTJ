@@ -3,8 +3,7 @@ name: Phase 19A canonical busy state
 on:
   push:
     branches: [main]
-    paths:
-      - '.github/workflows/phase19-repair.yml'
+    paths: ['.github/workflows/phase19-repair.yml']
   workflow_dispatch:
 
 permissions:
@@ -18,13 +17,12 @@ jobs:
   phase19a:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout main
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           ref: main
           fetch-depth: 0
 
-      - name: Backup and patch main.lua
+      - name: Patch and validate main.lua
         shell: bash
         run: |
           set -euo pipefail
@@ -35,11 +33,11 @@ jobs:
           from pathlib import Path
           import re
 
-          path = Path('main.lua')
-          raw = path.read_bytes()
-          newline = '\r\n' if b'\r\n' in raw else '\n'
-          text = raw.decode('utf-8').replace('\r\n', '\n')
-          before = text
+          p = Path('main.lua')
+          raw = p.read_bytes()
+          nl = '\r\n' if b'\r\n' in raw else '\n'
+          s = raw.decode('utf-8').replace('\r\n', '\n')
+          before = s
 
           old = '''if State.originalWalkSpeed == nil then State.originalWalkSpeed = Main.originalWalkSpeed end
           if State.isBusy == nil then State.isBusy = Main.isBusy == true end
@@ -62,72 +60,42 @@ jobs:
           end
           Main.config, Main.states = config, states
           Main.originalWalkSpeed = State.originalWalkSpeed
-          Main.isBusy = nil
           TJ.Main = Main'''.replace('          ', '')
-          if old in text:
-              text = text.replace(old, new, 1)
-          elif 'function Main:SetBusy(value, owner)' not in text:
-              raise SystemExit('Phase 19A state bootstrap anchor not found')
 
-          # Canonical reads. Do not retain fallback reads from Main.isBusy.
-          text = re.sub(
-              r'local state = Main\.State\n\s*local busy = \(state and state\.isBusy == true\) or Main\.isBusy == true',
-              'local busy = Main:IsBusy()', text
-          )
-          text = re.sub(r'\bif\s+warpActive\s+and\s+not\s+isBusy\s+then\b',
-                        'if warpActive and not Main:IsBusy() then', text)
-          text = re.sub(r'\belseif\s+isBusy\s+then\b',
-                        'elseif Main:IsBusy() then', text)
-          text = re.sub(
-              r'\bif\s+isBusy\s+or\s+flyNowe\s+or\s+states\.Fly\s+or\s+targetPlayer\s*==\s*LocalPlayer\s+then\s+return\s+end',
-              'if Main:IsBusy() or flyNowe or states.Fly or targetPlayer == LocalPlayer then return end', text
-          )
+          if old in s:
+              s = s.replace(old, new, 1)
+          elif 'function Main:SetBusy(value, owner)' not in s:
+              raise SystemExit('state bootstrap anchor not found')
 
-          # MM2 is the only writer of this busy gate in the current source.
-          text = re.sub(r'(?m)^\s*isBusy\s*=\s*true\s*$',
-                        '        Main:SetBusy(true, "MM2")', text)
-          text = re.sub(r'(?m)^\s*isBusy\s*=\s*false\s*$',
-                        '        Main:SetBusy(false, "MM2")', text)
+          s = re.sub(r'local state = Main\.State\n\s*local busy = \(state and state\.isBusy == true\) or Main\.isBusy == true', 'local busy = Main:IsBusy()', s)
+          s = re.sub(r'\bif\s+warpActive\s+and\s+not\s+isBusy\s+then\b', 'if warpActive and not Main:IsBusy() then', s)
+          s = re.sub(r'\belseif\s+isBusy\s+then\b', 'elseif Main:IsBusy() then', s)
+          s = re.sub(r'\bif\s+isBusy\s+or\s+flyNowe\s+or\s+states\.Fly\s+or\s+targetPlayer\s*==\s*LocalPlayer\s+then\s+return\s+end', 'if Main:IsBusy() or flyNowe or states.Fly or targetPlayer == LocalPlayer then return end', s)
+          s = re.sub(r'(?m)^(\s*)isBusy\s*=\s*true\s*$', r'\1Main:SetBusy(true, "MM2")', s)
+          s = re.sub(r'(?m)^(\s*)isBusy\s*=\s*false\s*$', r'\1Main:SetBusy(false, "MM2")', s)
 
-          # Contract: no legacy scalar mirror and no bare isBusy references.
-          forbidden = []
-          if re.search(r'\bMain\.isBusy\b', text): forbidden.append('Main.isBusy')
-          if re.search(r'(?<![.\w])isBusy(?![\w])', text): forbidden.append('bare isBusy')
-          if forbidden:
-              raise SystemExit('Phase 19A forbidden references remain: ' + ', '.join(forbidden))
+          if re.search(r'\bMain\.isBusy\b', s):
+              raise SystemExit('Main.isBusy remains')
+          bare = re.compile(r'(?<![.\w])isBusy(?![\w])')
+          if bare.search(s):
+              raise SystemExit('bare isBusy remains')
 
-          required = [
-              'function Main:IsBusy()',
-              'function Main:SetBusy(value, owner)',
-              'self.State.isBusy = busy',
-              'Main:SetBusy(true, "MM2")',
-              'Main:SetBusy(false, "MM2")',
-          ]
-          missing = [marker for marker in required if marker not in text]
+          required = ['function Main:IsBusy()', 'function Main:SetBusy(value, owner)', 'self.State.isBusy = busy', 'Main:SetBusy(true, "MM2")', 'Main:SetBusy(false, "MM2")']
+          missing = [x for x in required if x not in s]
           if missing:
-              raise SystemExit('Phase 19A markers missing: ' + repr(missing))
+              raise SystemExit('missing markers: ' + repr(missing))
 
-          if text == before:
-              print('Phase 19A already applied')
+          if s != before:
+              p.write_bytes(s.replace('\n', nl).encode('utf-8'))
+              print('Phase 19A applied')
           else:
-              path.write_bytes(text.replace('\n', newline).encode('utf-8'))
-              print('Phase 19A patch applied')
+              print('Phase 19A already complete')
           PY
-
-      - name: Validate Phase 19A
-        shell: bash
-        run: |
-          set -euo pipefail
           test "$(wc -c < main.lua)" -ge 300000
-          grep -qF 'function Main:IsBusy()' main.lua
-          grep -qF 'function Main:SetBusy(value, owner)' main.lua
-          grep -qF 'Main:SetBusy(true, "MM2")' main.lua
-          grep -qF 'Main:SetBusy(false, "MM2")' main.lua
           ! grep -qE '\bMain\.isBusy\b' main.lua
-          ! grep -qE '(^|[^.[:alnum:]_])isBusy([^[:alnum:]_]|$)' main.lua
           if [ -f static-check.sh ]; then bash static-check.sh main.lua; fi
 
-      - name: Commit Phase 19A
+      - name: Commit current Phase 19A result
         shell: bash
         run: |
           set -euo pipefail
@@ -135,9 +103,8 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -- main.lua
           if git diff --cached --quiet; then
-            echo 'Phase 19A already complete'
+            echo 'Phase 19A already committed'
             exit 0
           fi
-          git diff --cached --stat
           git commit -m 'refactor: make State.isBusy canonical'
           git push origin HEAD:main
