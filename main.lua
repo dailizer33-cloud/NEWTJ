@@ -552,6 +552,8 @@ ResourceManager.TotalConflicts = tonumber(ResourceManager.TotalConflicts) or 0
 ResourceManager.Window = tonumber(ResourceManager.Window) or 0.18
 ResourceManager.MaxConflicts = tonumber(ResourceManager.MaxConflicts) or 30
 ResourceManager.Owners = ResourceManager.Owners or {}
+ResourceManager.LastWriteAt = ResourceManager.LastWriteAt or {}
+ResourceManager.MinWriteInterval = tonumber(ResourceManager.MinWriteInterval) or 0.05
 function ResourceManager:Register(definition)
     if type(definition) ~= "table" or type(definition.id) ~= "string" or definition.id == "" then return false end
     local writes = {}
@@ -566,6 +568,9 @@ function ResourceManager:RecordWrite(moduleId, resource)
     local module = self.Modules[moduleId]
     if not module or not module.writes[resource] then return false end
     local now = os.clock()
+    local key = moduleId .. "|" .. resource
+    if self.LastWriteAt[key] and now - self.LastWriteAt[key] < self.MinWriteInterval then return true end
+    self.LastWriteAt[key] = now
     self.TotalWrites = self.TotalWrites + 1
     local recent, kept = self.RecentWrites[resource] or {}, {}
     for _, event in ipairs(recent) do
@@ -4921,7 +4926,7 @@ local okRB, errRB = pcall(function()
             lastFindAt = now
             biteButton = findBiteButton()
             if biteButton then
-                pcall(function() print("[TAYJAY RAPID] attack button found: " .. biteButton:GetFullName()) end)
+                pcall(function() print("[TAYJAY RAPID] attack button found") end)
             end
         end
         if not biteButton or not biteButton.Parent then lastMethod = "NO BUTTON" return false end
@@ -4969,7 +4974,7 @@ local okRB, errRB = pcall(function()
         if rapidMode == 2 and now >= stunCheckAt then
             stunCheckAt = now + 0.3
             local seen, text = scanStun()
-            if seen and not stunSeen then print("[TAYJAY RAPID] stun text detected: " .. tostring(text)) end
+            if seen and not stunSeen then pcall(function() warn("[TAYJAY RAPID] stun text detected") end) end
             stunSeen, stunText = seen, text or ""
         end
         if rapidMode == 2 and not stunSeen then clickAccumulator = 0 end
