@@ -3130,6 +3130,9 @@ local okMonster, errMonster = pcall(function()
     local MONSTER_GROUND_RAY = 14
     local MONSTER_GROUND_OFFSET = 2.2
     local monsterLastMoveAt = 0
+    local monsterSavedWalkSpeed = nil
+    local monsterSpeedCharacter = nil
+    local monsterAppliedWalkSpeed = nil
     -- AUTO-DODGE: อ่านท่าที่มอนสเตอร์กำลังเล่น (AnimationTrack) ถ้าเป็นท่าโจมตี/สกิล → ลอยหนีขึ้นข้างบนชั่วคราว
     local MONSTER_DODGE_HEIGHT = 45     -- หนีขึ้นสูงจากตัวมอนสเตอร์ (studs)
     local MONSTER_DODGE_MAX_SECONDS = 2.5
@@ -3834,6 +3837,14 @@ local okMonster, errMonster = pcall(function()
             return
         end
         states.MonsterWarp = false
+        local speedCharacter = monsterSpeedCharacter
+        local speedHumanoid = speedCharacter and speedCharacter:FindFirstChildOfClass("Humanoid")
+        if speedHumanoid and monsterSavedWalkSpeed ~= nil then
+            pcall(function() speedHumanoid.WalkSpeed = monsterSavedWalkSpeed end)
+        end
+        monsterSavedWalkSpeed = nil
+        monsterSpeedCharacter = nil
+        monsterAppliedWalkSpeed = nil
         monsterCurrent = nil
         monsterLastRoot = nil
         monsterTrackedTarget = nil
@@ -4010,6 +4021,10 @@ local okMonster, errMonster = pcall(function()
             setMonsterPanelStatus("👾 MONSTER WARP: WAIT", "ไม่พบตัวละครที่พร้อมใช้งาน", 0, 1)
             return
         end
+        monsterSavedWalkSpeed = humanoid.WalkSpeed
+        monsterSpeedCharacter = character
+        monsterAppliedWalkSpeed = math.random(60, 80)
+        humanoid.WalkSpeed = monsterAppliedWalkSpeed
         states.MonsterWarp = true
         monsterHome = root.CFrame
         monsterOwner = character
