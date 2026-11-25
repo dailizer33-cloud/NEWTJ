@@ -1,0 +1,34 @@
+name: Apply Hybrid Movement
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/apply-hybrid-movement.yml'
+      - 'tools/apply_hybrid_movement.py'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply hybrid WalkSpeed movement
+        run: |
+          set -euo pipefail
+          python3 tools/apply_hybrid_movement.py
+          grep -q MONSTER_WALK_SPEED_MIN main.lua
+          grep -q monsterEnsureWalkSpeed main.lua
+          grep -q 'hum:Move(dir, false)' main.lua
+          ! grep -q 'SAFE MOVEMENT (anti-kick): soft glide' main.lua
+      - name: Commit
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add main.lua
+          if git diff --cached --quiet; then echo 'no change'; exit 0; fi
+          git commit -m "feat: hybrid movement - WalkSpeed 60-80 near, soft glide far"
+          git push origin HEAD:main
