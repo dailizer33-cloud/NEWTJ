@@ -1,4 +1,4 @@
-name: Phase 19 repair and validation
+name: Phase 19A canonical busy state
 
 on:
   push:
@@ -11,11 +11,11 @@ permissions:
   contents: write
 
 concurrency:
-  group: phase19-repair-main
+  group: phase19a-main
   cancel-in-progress: false
 
 jobs:
-  repair:
+  phase19a:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout main
@@ -24,20 +24,13 @@ jobs:
           ref: main
           fetch-depth: 0
 
-      - name: Verify source and backup
+      - name: Backup and patch main.lua
         shell: bash
         run: |
           set -euo pipefail
           test -f main.lua
           test "$(wc -c < main.lua)" -ge 300000
-          git fetch origin backup/pre-phase19:refs/remotes/origin/backup/pre-phase19
-          git rev-parse --verify refs/remotes/origin/backup/pre-phase19
-          cp main.lua /tmp/main.lua.before-phase19
-
-      - name: Repair real main.lua
-        shell: bash
-        run: |
-          set -euo pipefail
+          cp main.lua /tmp/main.lua.phase19a.before
           python3 - <<'PY'
           from pathlib import Path
           import re
@@ -47,109 +40,94 @@ jobs:
           newline = '\r\n' if b'\r\n' in raw else '\n'
           text = raw.decode('utf-8').replace('\r\n', '\n')
           before = text
-          changes = []
 
-          if 'titleGradient.Parent = title' not in text:
-              logo = re.compile(
-                  r'(?m)^[ \t]*title\.TextStrokeTransparency\s*=\s*1\s*\n'
-                  r'(?P<keys>(?:[ \t]*ColorSequenceKeypoint\.new\([^\n]+\),?\s*\n){7})'
-                  r'[ \t]*\}\)'
-              )
-              m = logo.search(text)
-              if not m:
-                  raise SystemExit('orphaned logo gradient block not found')
-              keys = ''.join('    ' + line.strip() + '\n' for line in m.group('keys').splitlines())
-              fixed = (
-                  'title.TextStrokeColor3 = Color3.fromRGB(8, 18, 34)\n'
-                  'title.TextStrokeTransparency = 0.18\n'
-                  'local titleGradient = Instance.new("UIGradient")\n'
-                  'titleGradient.Name = "TayJayBrandGradient"\n'
-                  'titleGradient.Color = ColorSequence.new({\n' + keys + '})\n'
-                  'titleGradient.Parent = title'
-              )
-              text = text[:m.start()] + fixed + text[m.end():]
-              changes.append('logo-gradient')
+          old = '''if State.originalWalkSpeed == nil then State.originalWalkSpeed = Main.originalWalkSpeed end
+          if State.isBusy == nil then State.isBusy = Main.isBusy == true end
+          -- Legacy feature modules keep the same table references. Scalar runtime values
+          -- are stored in State and mirrored to legacy fields only when changed.
+          Main.config, Main.states = config, states
+          Main.originalWalkSpeed, Main.isBusy = State.originalWalkSpeed, State.isBusy
+          TJ.Main = Main'''.replace('          ', '')
+          new = '''if State.originalWalkSpeed == nil then State.originalWalkSpeed = Main.originalWalkSpeed end
+          if State.isBusy == nil then State.isBusy = false end
+          State.busyOwner = State.isBusy and State.busyOwner or nil
+          function Main:IsBusy()
+              return self.State.isBusy == true
+          end
+          function Main:SetBusy(value, owner)
+              local busy = value == true
+              self.State.isBusy = busy
+              self.State.busyOwner = busy and tostring(owner or "UNKNOWN") or nil
+              return busy
+          end
+          Main.config, Main.states = config, states
+          Main.originalWalkSpeed = State.originalWalkSpeed
+          Main.isBusy = nil
+          TJ.Main = Main'''.replace('          ', '')
+          if old in text:
+              text = text.replace(old, new, 1)
+          elif 'function Main:SetBusy(value, owner)' not in text:
+              raise SystemExit('Phase 19A state bootstrap anchor not found')
 
-          fps = re.compile(
-              r'(local function corner\(parent\s*,\s*radius\)\s*\n'
-              r'[ \t]*ui\("UICorner"[^\n]*\)\s*\n'
-              r'[ \t]*end\s*\n)'
-              r'[ \t]*end\s*\n'
-              r'(?=[ \t]*local panel\s*=\s*ui\()'
+          # Canonical reads. Do not retain fallback reads from Main.isBusy.
+          text = re.sub(
+              r'local state = Main\.State\n\s*local busy = \(state and state\.isBusy == true\) or Main\.isBusy == true',
+              'local busy = Main:IsBusy()', text
           )
-          text, n = fps.subn(r'\1', text, count=1)
-          if n:
-              changes.append('fps-extra-end')
+          text = re.sub(r'\bif\s+warpActive\s+and\s+not\s+isBusy\s+then\b',
+                        'if warpActive and not Main:IsBusy() then', text)
+          text = re.sub(r'\belseif\s+isBusy\s+then\b',
+                        'elseif Main:IsBusy() then', text)
+          text = re.sub(
+              r'\bif\s+isBusy\s+or\s+flyNowe\s+or\s+states\.Fly\s+or\s+targetPlayer\s*==\s*LocalPlayer\s+then\s+return\s+end',
+              'if Main:IsBusy() or flyNowe or states.Fly or targetPlayer == LocalPlayer then return end', text
+          )
 
-          busy_pairs = [
-              (r'\bif\s+warpActive\s+and\s+not\s+isBusy\s+then\b', 'if warpActive and not Main.State.isBusy then'),
-              (r'\belseif\s+isBusy\s+then\b', 'elseif Main.State.isBusy then'),
-              (r'\bif\s+isBusy\s+or\s+flyNowe\s+or\s+states\.Fly\s+or\s+targetPlayer\s*==\s*LocalPlayer\s+then\s+return\s+end',
-               'if Main.State.isBusy or flyNowe or states.Fly or targetPlayer == LocalPlayer then return end'),
-          ]
-          for pattern, replacement in busy_pairs:
-              text, n = re.subn(pattern, replacement, text)
-              if n:
-                  changes.append('busy-state')
+          # MM2 is the only writer of this busy gate in the current source.
+          text = re.sub(r'(?m)^\s*isBusy\s*=\s*true\s*$',
+                        '        Main:SetBusy(true, "MM2")', text)
+          text = re.sub(r'(?m)^\s*isBusy\s*=\s*false\s*$',
+                        '        Main:SetBusy(false, "MM2")', text)
 
-          # Safe originalWalkSpeed transformations. Never qualify a local declaration.
-          speed_rules = [
-              (r'(?<![.\w])originalWalkSpeed\s*==\s*nil', 'TJ.Main.State.originalWalkSpeed == nil', 'walk-speed-nil-read'),
-              (r'(?<![.\w])originalWalkSpeed\s*~=\s*nil', 'TJ.Main.State.originalWalkSpeed ~= nil', 'walk-speed-value-read'),
-              (r'hum\.WalkSpeed\s*=\s*(?<![.\w])originalWalkSpeed\b', 'hum.WalkSpeed = TJ.Main.State.originalWalkSpeed', 'walk-speed-restore'),
-              (r'(?<![.\w])originalWalkSpeed\s*=\s*hum\.WalkSpeed', 'TJ.Main.State.originalWalkSpeed = hum.WalkSpeed', 'walk-speed-save'),
-              (r'(?m)^(?![ \t]*local\b)(?P<i>[ \t]*)originalWalkSpeed\s*=\s*nil\s*;?', r'\g<i>TJ.Main.State.originalWalkSpeed = nil', 'walk-speed-reset'),
-          ]
-          for pattern, replacement, label in speed_rules:
-              text, n = re.subn(pattern, replacement, text)
-              if n:
-                  changes.append(label)
-
-          if 'local TJ.Main.State.originalWalkSpeed' in text:
-              raise SystemExit('invalid qualified local declaration')
-
-          legacy_uses = [
-              r'(?<![.\w])originalWalkSpeed\s*==\s*nil',
-              r'(?<![.\w])originalWalkSpeed\s*~=\s*nil',
-              r'hum\.WalkSpeed\s*=\s*(?<![.\w])originalWalkSpeed\b',
-              r'(?<![.\w])originalWalkSpeed\s*=\s*hum\.WalkSpeed',
-              r'(?m)^(?![ \t]*local\b)[ \t]*originalWalkSpeed\s*=\s*nil',
-          ]
-          remaining = [pattern for pattern in legacy_uses if re.search(pattern, text)]
-          if remaining:
-              raise SystemExit('unsafe originalWalkSpeed uses remain: ' + repr(remaining))
+          # Contract: no legacy scalar mirror and no bare isBusy references.
+          forbidden = []
+          if re.search(r'\bMain\.isBusy\b', text): forbidden.append('Main.isBusy')
+          if re.search(r'(?<![.\w])isBusy(?![\w])', text): forbidden.append('bare isBusy')
+          if forbidden:
+              raise SystemExit('Phase 19A forbidden references remain: ' + ', '.join(forbidden))
 
           required = [
-              'titleGradient.Parent = title',
-              'local panel = ui(',
-              'Main.State.isBusy',
-              'TJ.Main.State.originalWalkSpeed',
-              'end, function(_tjErr)',
+              'function Main:IsBusy()',
+              'function Main:SetBusy(value, owner)',
+              'self.State.isBusy = busy',
+              'Main:SetBusy(true, "MM2")',
+              'Main:SetBusy(false, "MM2")',
           ]
           missing = [marker for marker in required if marker not in text]
           if missing:
-              raise SystemExit('required repaired markers missing: ' + repr(missing))
+              raise SystemExit('Phase 19A markers missing: ' + repr(missing))
 
-          if text != before:
-              path.write_bytes(text.replace('\n', newline).encode('utf-8'))
-              print('applied:', ', '.join(changes))
+          if text == before:
+              print('Phase 19A already applied')
           else:
-              print('main.lua already satisfies repair contract')
+              path.write_bytes(text.replace('\n', newline).encode('utf-8'))
+              print('Phase 19A patch applied')
           PY
 
-      - name: Validate repaired source
+      - name: Validate Phase 19A
         shell: bash
         run: |
           set -euo pipefail
           test "$(wc -c < main.lua)" -ge 300000
-          grep -qF 'titleGradient.Parent = title' main.lua
-          grep -qF 'Main.State.isBusy' main.lua
-          grep -qF 'TJ.Main.State.originalWalkSpeed' main.lua
-          grep -qF 'end, function(_tjErr)' main.lua
-          ! grep -qF 'local TJ.Main.State.originalWalkSpeed' main.lua
+          grep -qF 'function Main:IsBusy()' main.lua
+          grep -qF 'function Main:SetBusy(value, owner)' main.lua
+          grep -qF 'Main:SetBusy(true, "MM2")' main.lua
+          grep -qF 'Main:SetBusy(false, "MM2")' main.lua
+          ! grep -qE '\bMain\.isBusy\b' main.lua
+          ! grep -qE '(^|[^.[:alnum:]_])isBusy([^[:alnum:]_]|$)' main.lua
           if [ -f static-check.sh ]; then bash static-check.sh main.lua; fi
 
-      - name: Commit repaired main.lua
+      - name: Commit Phase 19A
         shell: bash
         run: |
           set -euo pipefail
@@ -157,9 +135,9 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -- main.lua
           if git diff --cached --quiet; then
-            echo 'main.lua already ready for Phase 19'
+            echo 'Phase 19A already complete'
             exit 0
           fi
           git diff --cached --stat
-          git commit -m 'Phase 19: repair real main.lua startup and shared state'
+          git commit -m 'refactor: make State.isBusy canonical'
           git push origin HEAD:main
