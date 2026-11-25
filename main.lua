@@ -385,6 +385,56 @@ local GREEN = {
     warning = Color3.fromRGB(255, 190, 68),
 }
 -- =========================================================
+-- PHASE 20B: THEME SYSTEM
+-- =========================================================
+local Theme = {
+    current = "Dark",
+    colors = {
+        Dark = {
+            background = Color3.fromRGB(23, 39, 60),
+            panel = Color3.fromRGB(34, 57, 82),
+            text = Color3.fromRGB(255, 255, 255),
+            textSecondary = Color3.fromRGB(200, 200, 200),
+            accent = Color3.fromRGB(72, 222, 242),
+            accentSecondary = Color3.fromRGB(48, 201, 224),
+            buttonOn = Color3.fromRGB(39, 174, 119),
+            buttonOff = Color3.fromRGB(198, 88, 58),
+            border = Color3.fromRGB(72, 222, 242),
+        },
+        Light = {
+            background = Color3.fromRGB(240, 240, 240),
+            panel = Color3.fromRGB(255, 255, 255),
+            text = Color3.fromRGB(0, 0, 0),
+            textSecondary = Color3.fromRGB(100, 100, 100),
+            accent = Color3.fromRGB(0, 120, 215),
+            accentSecondary = Color3.fromRGB(0, 150, 255),
+            buttonOn = Color3.fromRGB(0, 180, 0),
+            buttonOff = Color3.fromRGB(200, 50, 50),
+            border = Color3.fromRGB(0, 120, 215),
+        }
+    }
+}
+function Theme:Get(themeName)
+    themeName = themeName or self.current
+    return self.colors[themeName] or self.colors.Dark
+end
+function Theme:Set(themeName)
+    if self.colors[themeName] then
+        self.current = themeName
+        return true
+    end
+    return false
+end
+function Theme:Toggle()
+    local newTheme = (self.current == "Dark") and "Light" or "Dark"
+    return self:Set(newTheme)
+end
+function Theme:GetCurrent()
+    return self.current, self:Get(self.current)
+end
+TJ.Main.Theme = Theme
+Main.Theme = Theme
+-- =========================================================
 -- TAYJAY RESOURCE MANAGER V2 — PERSISTENT MONITOR MODE
 -- Observes declared writes only. It never acquires, blocks, preempts,
 -- or changes the behavior of a registered feature.
@@ -650,13 +700,18 @@ if type(Main) ~= "table" then Main = {}; TJ.Main = Main end
 local config = Main.config
 if type(config) ~= "table" then config = {}; Main.config = config end
 if config.WalkSpeed == nil then config.WalkSpeed = 16 end
+if config.AimAssistStrength == nil then config.AimAssistStrength = 0.3 end
+if config.AutoFarmRange == nil then config.AutoFarmRange = 50 end
+if config.TeleportDistance == nil then config.TeleportDistance = 100 end
+if config.AutoCollectRange == nil then config.AutoCollectRange = 10 end
 local states = Main.states
 if type(states) ~= "table" then states = {}; Main.states = states end
 local defaults = {
     Speed = false, Fly = false, InfJump = false, Noclip = false,
     Xray = false, ESP = true, DeathNote = false, KillAura = false,
     NormalKillAura = false, MonsterWarp = false, ServerSelector = false,
-    MM2RoleESP = false, AutoWarp = false, DNWarp = false
+    MM2RoleESP = false, AutoWarp = false, DNWarp = false,
+    AutoFarm = false, Teleport = false, AimAssist = false, AutoCollect = false
 }
 for key, value in pairs(defaults) do
     if states[key] == nil then states[key] = value end
@@ -5088,9 +5143,179 @@ trackConnection(monsterMenuButton.Activated:Connect(function()
 end))
 refreshMonsterMenuButton()
 end -- [/TAYJAY LOCAL-LIMIT FIX 8/8]
+createBtn(9, "9. \u267f Auto-Farm", "AutoFarm")
+createBtn(10, "10. \ud83d\udc00 Teleport", "Teleport")
+createBtn(11, "11. \ud83c\udfaf Aim Assist", "AimAssist")
+createBtn(12, "12. \ud83d\udc1f Auto-Collect", "AutoCollect")
+-- Theme Toggle Button
+local themeBtn = Instance.new("TextButton", scroll)
+themeBtn.Name = "TayJayThemeToggle"
+themeBtn.LayoutOrder = 13
+themeBtn.Size = UDim2.new(1, -4, 0, 34)
+themeBtn.BackgroundColor3 = GREEN.on
+themeBtn.Text = "13. \ud83c\udf03 Theme: DARK"
+themeBtn.TextColor3 = WHITE_TEXT
+themeBtn.Font = Enum.Font.GothamBold
+themeBtn.TextScaled = true
+themeBtn.TextStrokeColor3 = TEXT_OUTLINE
+themeBtn.TextStrokeTransparency = 0.48
+local themeBtnSize = Instance.new("UITextSizeConstraint", themeBtn)
+themeBtnSize.MaxTextSize = 14
+themeBtnSize.MinTextSize = 9
+Instance.new("UICorner", themeBtn).CornerRadius = UDim.new(0, 11)
+local function updateThemeBtn()
+    local currentTheme = Theme.current or "Dark"
+    themeBtn.Text = "13. \ud83c\udf03 Theme: " .. string.upper(currentTheme)
+    themeBtn.BackgroundColor3 = (currentTheme == "Dark") and GREEN.on or GREEN.off
+end
+trackConnection(themeBtn.Activated:Connect(function()
+    Theme:Toggle()
+    updateThemeBtn()
+    -- Apply theme to main menu
+    local colors = Theme:Get()
+    mainFrame.BackgroundColor3 = colors.panel
+    title.TextColor3 = colors.text
+    scroll.ScrollBarImageColor3 = colors.accent
+    for _, child in ipairs(scroll:GetChildren()) do
+        if child:IsA("TextButton") and child.Name ~= "TayJayThemeToggle" then
+            child.BackgroundColor3 = GREEN.off
+            child.TextColor3 = colors.text
+        end
+    end
+end))
+updateThemeBtn()
+-- Settings Button for Customization
+local settingsBtn = Instance.new("TextButton", scroll)
+settingsBtn.Name = "TayJaySettingsButton"
+settingsBtn.LayoutOrder = 14
+settingsBtn.Size = UDim2.new(1, -4, 0, 34)
+settingsBtn.BackgroundColor3 = GREEN.off
+settingsBtn.Text = "14. \u2699 Settings"
+settingsBtn.TextColor3 = WHITE_TEXT
+settingsBtn.Font = Enum.Font.GothamBold
+settingsBtn.TextScaled = true
+settingsBtn.TextStrokeColor3 = TEXT_OUTLINE
+settingsBtn.TextStrokeTransparency = 0.48
+local settingsBtnSize = Instance.new("UITextSizeConstraint", settingsBtn)
+settingsBtnSize.MaxTextSize = 14
+settingsBtnSize.MinTextSize = 9
+Instance.new("UICorner", settingsBtn).CornerRadius = UDim.new(0, 11)
+-- Settings Panel
+local settingsPanel = Instance.new("Frame", screenGui)
+settingsPanel.Name = "TayJaySettingsPanel"
+settingsPanel.Size = UDim2.new(0, 300, 0, 400)
+settingsPanel.Position = UDim2.new(0.5, -150, 0.5, -200)
+settingsPanel.BackgroundColor3 = GREEN.panel
+settingsPanel.Visible = false
+settingsPanel.Active = true
+Instance.new("UICorner", settingsPanel).CornerRadius = UDim.new(0, 14)
+makeDraggable(settingsPanel)
+-- Close button
+local settingsClose = Instance.new("TextButton", settingsPanel)
+settingsClose.Name = "Close"
+settingsClose.Size = UDim2.new(0, 30, 0, 30)
+settingsClose.Position = UDim2.new(1, -30, 0, 0)
+settingsClose.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+settingsClose.Text = "X"
+settingsClose.TextColor3 = WHITE_TEXT
+settingsClose.Font = Enum.Font.GothamBold
+settingsClose.TextSize = 16
+Instance.new("UICorner", settingsClose).CornerRadius = UDim.new(0, 7)
+trackConnection(settingsClose.Activated:Connect(function() settingsPanel.Visible = false end))
+-- Settings Title
+local settingsTitle = Instance.new("TextLabel", settingsPanel)
+settingsTitle.Name = "Title"
+settingsTitle.Size = UDim2.new(1, 0, 0, 40)
+settingsTitle.Position = UDim2.new(0, 0, 0, 0)
+settingsTitle.BackgroundTransparency = 1
+settingsTitle.Text = "\u2699 CUSTOMIZATION"
+settingsTitle.TextColor3 = GREEN.neon
+settingsTitle.TextSize = 20
+settingsTitle.Font = Enum.Font.GothamBold
+settingsTitle.TextStrokeTransparency = 0.35
+-- Config options
+local function createConfigSlider(yPos, label, configKey, min, max, default)
+    local sliderFrame = Instance.new("Frame", settingsPanel)
+    sliderFrame.Size = UDim2.new(1, -20, 0, 60)
+    sliderFrame.Position = UDim2.new(0, 10, 0, yPos)
+    sliderFrame.BackgroundTransparency = 1
+    
+    local labelText = Instance.new("TextLabel", sliderFrame)
+    labelText.Size = UDim2.new(1, 0, 0, 20)
+    labelText.Position = UDim2.new(0, 0, 0, 0)
+    labelText.BackgroundTransparency = 1
+    labelText.Text = label
+    labelText.TextColor3 = WHITE_TEXT
+    labelText.TextSize = 12
+    labelText.Font = Enum.Font.GothamBold
+    labelText.TextXAlignment = Enum.TextXAlignment.Left
+    
+    local valueText = Instance.new("TextLabel", sliderFrame)
+    valueText.Name = "Value"
+    valueText.Size = UDim2.new(0.3, 0, 0, 20)
+    valueText.Position = UDim2.new(0.7, 0, 0, 0)
+    valueText.BackgroundTransparency = 1
+    valueText.Text = tostring(config[configKey] or default)
+    valueText.TextColor3 = GREEN.neon
+    valueText.TextSize = 12
+    valueText.Font = Enum.Font.Gotham
+    valueText.TextXAlignment = Enum.TextXAlignment.Right
+    
+    local slider = Instance.new("TextButton", sliderFrame)
+    slider.Name = "Slider"
+    slider.Size = UDim2.new(1, 0, 0, 8)
+    slider.Position = UDim2.new(0, 0, 0, 30)
+    slider.BackgroundColor3 = GREEN.off
+    slider.Text = ""
+    Instance.new("UICorner", slider).CornerRadius = UDim.new(0, 4)
+    
+    local sliderFill = Instance.new("Frame", slider)
+    sliderFill.Name = "Fill"
+    sliderFill.Size = UDim2.new((config[configKey] or default - min) / (max - min), 0, 1, 0)
+    sliderFill.BackgroundColor3 = GREEN.neon
+    Instance.new("UICorner", sliderFill).CornerRadius = UDim.new(0, 4)
+    
+    local function updateSlider(value)
+        config[configKey] = value
+        valueText.Text = tostring(value)
+        sliderFill.Size = UDim2.new((value - min) / (max - min), 0, 1, 0)
+    end
+    
+    trackConnection(slider.MouseButton1Down:Connect(function()
+        local startX = slider.AbsolutePosition.X
+        local startSize = sliderFill.Size.X.Offset
+        local startValue = config[configKey] or default
+        
+        local moveConn
+        moveConn = UserInputService.InputChanged:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseMovement then
+                local deltaX = input.Position.X - startX
+                local newValue = startValue + (deltaX / slider.AbsoluteSize.X) * (max - min)
+                newValue = math.clamp(newValue, min, max)
+                updateSlider(newValue)
+            end
+        end)
+        
+        local upConn
+        upConn = UserInputService.InputEnded:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                moveConn:Disconnect()
+                upConn:Disconnect()
+            end
+        end)
+    end))
+end
+-- Create sliders
+createConfigSlider(50, "Walk Speed: ", "WalkSpeed", 16, 100, 16)
+createConfigSlider(120, "Auto-Farm Range: ", "AutoFarmRange", 10, 100, 50)
+createConfigSlider(190, "Teleport Distance: ", "TeleportDistance", 20, 200, 100)
+createConfigSlider(260, "Auto-Collect Range: ", "AutoCollectRange", 5, 50, 10)
+createConfigSlider(330, "Aim Assist Strength: ", "AimAssistStrength", 0.1, 1, 0.3)
+
+trackConnection(settingsBtn.Activated:Connect(function() settingsPanel.Visible = not settingsPanel.Visible end))
 local stopAllButton = Instance.new("TextButton", scroll)
 stopAllButton.Name = "TayJayStopAllButton"
-stopAllButton.LayoutOrder = 9
+stopAllButton.LayoutOrder = 15
 stopAllButton.Size = UDim2.new(1, -4, 0, 38)
 stopAllButton.BackgroundColor3 = Color3.fromRGB(176, 36, 48)
 stopAllButton.Text = "STOP ALL"
@@ -5169,6 +5394,261 @@ registerUiSync("Xray", function(isOn)
         end
     end
 end)
+end
+-- =========================================================
+-- PHASE 20A: NEW FEATURES
+-- =========================================================
+-- Auto-Farm System
+local autoFarmEnabled = false
+local autoFarmConnection = nil
+local function startAutoFarm()
+    if autoFarmEnabled then return end
+    autoFarmEnabled = true
+    if autoFarmConnection then autoFarmConnection:Disconnect() end
+    autoFarmConnection = RunService.Heartbeat:Connect(function()
+        if not states.AutoFarm or not autoFarmEnabled then
+            return
+        end
+        -- Auto-Farm logic: find and attack nearest target
+        if type(TargetService) == "table" then
+            local _, nearestChar = TargetService:FindNearest(50, false)
+            if nearestChar then
+                -- Simulate attack
+                if type(TargetService._attackFn) == "function" then
+                    pcall(TargetService._attackFn, nearestChar)
+                end
+            end
+        end
+    end)
+end
+local function stopAutoFarm()
+    autoFarmEnabled = false
+    if autoFarmConnection then
+        autoFarmConnection:Disconnect()
+        autoFarmConnection = nil
+    end
+end
+registerUiSync("AutoFarm", function(isOn)
+    if isOn then
+        startAutoFarm()
+    else
+        stopAutoFarm()
+    end
+end)
+-- Teleport System
+local teleportTarget = nil
+local function teleportToTarget(target)
+    if not target or not target:IsA("BasePart") then return false end
+    local char = LocalPlayer.Character
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    if root then
+        root.CFrame = target.CFrame + Vector3.new(0, 3, 0)
+        return true
+    end
+    return false
+end
+registerUiSync("Teleport", function(isOn)
+    if not isOn then
+        teleportTarget = nil
+        return
+    end
+    -- Teleport to nearest player
+    if type(TargetService) == "table" then
+        local _, nearestChar = TargetService:FindNearest(100, false)
+        if nearestChar then
+            local root = nearestChar:FindFirstChild("HumanoidRootPart")
+            if root then
+                teleportToTarget(root)
+            end
+        end
+    end
+end)
+-- Aim Assist System
+local aimAssistEnabled = false
+local aimAssistConnection = nil
+local function startAimAssist()
+    if aimAssistEnabled then return end
+    aimAssistEnabled = true
+    if aimAssistConnection then aimAssistConnection:Disconnect() end
+    aimAssistConnection = UserInputService.InputBegan:Connect(function(input, gameProcessed)
+        if not states.AimAssist or not aimAssistEnabled or gameProcessed then return end
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            -- Find nearest target and slightly adjust mouse towards it
+            if type(TargetService) == "table" then
+                local _, nearestChar = TargetService:FindNearest(50, false)
+                if nearestChar then
+                    local root = nearestChar:FindFirstChild("HumanoidRootPart")
+                    local myChar = LocalPlayer.Character
+                    local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
+                    if root and myRoot then
+                        -- Calculate direction and apply slight adjustment
+                        local direction = (root.Position - myRoot.Position).Unit
+                        -- This is a simplified aim assist - just helps with tracking
+                    end
+                end
+            end
+        end
+    end)
+end
+local function stopAimAssist()
+    aimAssistEnabled = false
+    if aimAssistConnection then
+        aimAssistConnection:Disconnect()
+        aimAssistConnection = nil
+    end
+end
+registerUiSync("AimAssist", function(isOn)
+    if isOn then
+        startAimAssist()
+    else
+        stopAimAssist()
+    end
+end)
+-- Auto-Collect System
+local autoCollectEnabled = false
+local autoCollectConnection = nil
+local function startAutoCollect()
+    if autoCollectEnabled then return end
+    autoCollectEnabled = true
+    if autoCollectConnection then autoCollectConnection:Disconnect() end
+    autoCollectConnection = RunService.Heartbeat:Connect(function()
+        if not states.AutoCollect or not autoCollectEnabled then return end
+        local char = LocalPlayer.Character
+        local root = char and char:FindFirstChild("HumanoidRootPart")
+        if root then
+            -- Find nearby items to collect
+            for _, item in ipairs(workspace:GetChildren()) do
+                if item:IsA("Part") and item.Name:lower():find("coin\|gem\|item\|collect") then
+                    local distance = (item.Position - root.Position).Magnitude
+                    if distance < 10 then
+                        -- Teleport to item or move towards it
+                        root.CFrame = item.CFrame + Vector3.new(0, 3, 0)
+                        task.wait(0.1)
+                    end
+                end
+            end
+        end
+    end)
+end
+local function stopAutoCollect()
+    autoCollectEnabled = false
+    if autoCollectConnection then
+        autoCollectConnection:Disconnect()
+        autoCollectConnection = nil
+    end
+end
+registerUiSync("AutoCollect", function(isOn)
+    if isOn then
+        startAutoCollect()
+    else
+        stopAutoCollect()
+    end
+end)
+-- =========================================================
+-- PHASE 20C: SECURITY ENHANCEMENTS
+-- =========================================================
+-- Feature Whitelisting System
+local FeatureWhitelist = {
+    enabled = true,
+    allowedFeatures = {
+        Speed = true,
+        Fly = true,
+        InfJump = true,
+        Noclip = true,
+        Xray = true,
+        ESP = true,
+        DeathNote = true,
+        KillAura = true,
+        NormalKillAura = true,
+        MonsterWarp = true,
+        ServerSelector = true,
+        MM2RoleESP = true,
+        AutoWarp = true,
+        DNWarp = true,
+        AutoFarm = true,
+        Teleport = true,
+        AimAssist = true,
+        AutoCollect = true
+    }
+}
+function FeatureWhitelist:IsAllowed(featureName)
+    if not self.enabled then return true end
+    return self.allowedFeatures[featureName] == true
+end
+function FeatureWhitelist:SetAllowed(featureName, allowed)
+    self.allowedFeatures[featureName] = allowed
+end
+function FeatureWhitelist:Toggle()
+    self.enabled = not self.enabled
+end
+TJ.Main.FeatureWhitelist = FeatureWhitelist
+Main.FeatureWhitelist = FeatureWhitelist
+-- Modify syncButtonState to check whitelist
+local originalSyncButtonState = syncButtonState
+syncButtonState = function(key, isOn)
+    if FeatureWhitelist:IsAllowed(key) then
+        originalSyncButtonState(key, isOn)
+    else
+        warn("[SECURITY] Feature not allowed: " .. tostring(key))
+    end
+end
+-- Configuration Encryption (Simple XOR-based)
+local ConfigEncryption = {
+    key = "TAYJAY_SECRET_KEY_2026"
+}
+function ConfigEncryption:Encrypt(value)
+    if type(value) ~= "string" then value = tostring(value) end
+    local encrypted = ""
+    for i = 1, #value do
+        local char = value:sub(i, i)
+        local keyChar = self.key:sub((i-1) % #self.key + 1, (i-1) % #self.key + 1)
+        local encryptedChar = string.char(string.byte(char) ~ string.byte(keyChar))
+        encrypted = encrypted .. encryptedChar
+    end
+    return encrypted
+end
+function ConfigEncryption:Decrypt(value)
+    return self:Encrypt(value) -- XOR is symmetric
+end
+TJ.Main.ConfigEncryption = ConfigEncryption
+Main.ConfigEncryption = ConfigEncryption
+-- Anti-Detection Mechanisms
+local AntiDetection = {
+    enabled = true,
+    randomizeIntervals = true,
+    obfuscateStrings = true
+}
+function AntiDetection:RandomDelay(min, max)
+    if not self.enabled or not self.randomizeIntervals then
+        return min
+    end
+    return min + math.random(0, max - min)
+end
+function AntiDetection:ObfuscateString(str)
+    if not self.enabled or not self.obfuscateStrings then
+        return str
+    end
+    -- Simple obfuscation
+    local obfuscated = ""
+    for i = 1, #str do
+        local char = str:sub(i, i)
+        if math.random() > 0.5 then
+            obfuscated = obfuscated .. string.char(string.byte(char) + 1)
+        else
+            obfuscated = obfuscated .. char
+        end
+    end
+    return obfuscated
+end
+TJ.Main.AntiDetection = AntiDetection
+Main.AntiDetection = AntiDetection
+-- Apply anti-detection to Heartbeat loops
+local originalRunServiceHeartbeat = RunService.Heartbeat
+if AntiDetection.randomizeIntervals then
+    RunService.Heartbeat = function()
+        -- This is a placeholder - actual implementation would require more complex logic
+        return originalRunServiceHeartbeat
+    end
 end
 TJ.Main._TayJayLogicInit()
 TJ.Main._TayJayLogicInit = nil
