@@ -3120,19 +3120,27 @@ local okMonster, errMonster = pcall(function()
     local MONSTER_ORBIT_BREATH = 1.2   -- รัศมีแกว่งเข้า-ออก (studs) ให้จังหวะไม่คงที่
     local MONSTER_ORBIT_BOB = 0.8      -- แกว่งขึ้น-ลง (studs)
     local MONSTER_ENTER_SECONDS = 0.6  -- เข้า "สิงร่าง" (อยู่กลางตัวมอนสเตอร์) ก่อน แล้วค่อยขยายวงออกถึงรัศมีเต็มในเวลานี้
-    -- SAFE MOVEMENT (anti-kick): soft glide + hop clamp + optional ground stick
-    local MONSTER_GLIDE_SPEED = math.random(100, 120) -- studs/sec (applied as max step = speed * dt)
+    -- HYBRID MOVEMENT (anti-kick):
+    --   near  (<= MONSTER_WALK_NEAR): Humanoid WalkSpeed 60-80 + Move()
+    --   far   (>  MONSTER_WALK_NEAR): soft glide + hop clamp + ground stick
+    --   aerial/dodge: glide only
+    local MONSTER_WALK_SPEED_MIN = 60
+    local MONSTER_WALK_SPEED_MAX = 80
+    local MONSTER_WALK_NEAR = 28           -- studs horizontal: use walk mode
+    local MONSTER_GLIDE_SPEED = math.random(90, 110) -- studs/sec when far
     local MONSTER_WARP_MAX_HOP = 36         -- max single hop (keep under ~40)
-    local MONSTER_MOVE_COOLDOWN = 0.03      -- min seconds between position writes
-    local MONSTER_HORIZONTAL_LERP = 0.18    -- soft blend toward destination (ลดกระตุก)
+    local MONSTER_MOVE_COOLDOWN = 0.03      -- min seconds between position writes (glide)
+    local MONSTER_HORIZONTAL_LERP = 0.18
     local MONSTER_VERTICAL_LERP = 0.26
-    local MONSTER_GROUND_STICK = true       -- raycast ground when not dodging/orbit-bob heavy
+    local MONSTER_GROUND_STICK = true
     local MONSTER_GROUND_RAY = 14
     local MONSTER_GROUND_OFFSET = 2.2
     local monsterLastMoveAt = 0
     local monsterSavedWalkSpeed = nil
     local monsterSpeedCharacter = nil
     local monsterAppliedWalkSpeed = nil
+    local monsterMoveMode = "GLIDE"        -- "WALK" | "GLIDE"
+
     -- AUTO-DODGE: อ่านท่าที่มอนสเตอร์กำลังเล่น (AnimationTrack) ถ้าเป็นท่าโจมตี/สกิล → ลอยหนีขึ้นข้างบนชั่วคราว
     local MONSTER_DODGE_HEIGHT = 45     -- หนีขึ้นสูงจากตัวมอนสเตอร์ (studs)
     local MONSTER_DODGE_MAX_SECONDS = 2.5
@@ -3694,39 +3702,94 @@ local okMonster, errMonster = pcall(function()
       end
       return position.Y
     end
+    local function monsterEnsureWalkSpeed(character)
+      if not character then return nil end
+      local hum = character:FindFirstChildOfClass("Humanoid")
+      if not hum then return nil end
+      if monsterSpeedCharacter ~= character or monsterSavedWalkSpeed == nil then
+         monsterSavedWalkSpeed = hum.WalkSpeed
+         monsterSpeedCharacter = character
+      end
+      local targetSpeed = math.random(MONSTER_WALK_SPEED_MIN, MONSTER_WALK_SPEED_MAX)
+      if monsterAppliedWalkSpeed ~= targetSpeed or hum.WalkSpeed ~= targetSpeed then
+         pcall(function()
+            ResourceManager:RecordWrite("MonsterWarp", "WalkSpeed")
+            hum.WalkSpeed = targetSpeed
+         end)
+         monsterAppliedWalkSpeed = targetSpeed
+      end
+      return hum
+    end
     local function monsterSoftApply(myRoot, desiredCF, character, targetModel, dt, aerial)
       local now = os.clock()
-      if now - monsterLastMoveAt < MONSTER_MOVE_COOLDOWN then
-         return false, "cooldown"
-      end
       dt = tonumber(dt) or 0.016
       if dt <= 0 then dt = 0.016 end
-      if dt > 0.1 then dt = 0.1 end -- avoid huge jumps after hitch
+      if dt > 0.1 then dt = 0.1 end
       local current = myRoot.CFrame
       local from = current.Position
       local desiredPos = desiredCF.Position
       local delta = desiredPos - from
       local distance = delta.Magnitude
-      -- Phase physics fix: GLIDE_SPEED is real studs/sec cap before hop clamp
+      local horiz = Vector3.new(delta.X, 0, delta.Z)
+      local horizDist = horiz.Magnitude
+
+      -- NEAR: hybrid walk (WalkSpeed 60-80)
+      if (not aerial) and horizDist <= MONSTER_WALK_NEAR and distance > 0.35 then
+         local hum = monsterEnsureWalkSpeed(character)
+         if hum then
+            local dir = horizDist > 0.05 and horiz.Unit or Vector3.zero
+            pcall(function()
+               hum:Move(dir, false)
+            end)
+            if horizDist > 0.4 then
+               local face = from + Vector3.new(delta.X, 0, delta.Z)
+               if (face - from).Magnitude > 0.08 then
+                  local faceCF = CFrame.lookAt(from, Vector3.new(face.X, from.Y, face.Z))
+                  local flatLook = Vector3.new(current.LookVector.X, 0, current.LookVector.Z)
+                  local wantLook = Vector3.new(faceCF.LookVector.X, 0, faceCF.LookVector.Z)
+                  if flatLook.Magnitude > 0.05 and wantLook.Magnitude > 0.05 then
+                     if flatLook.Unit:Dot(wantLook.Unit) < 0.92 then
+                        if now - monsterLastMoveAt >= MONSTER_MOVE_COOLDOWN then
+                           ResourceManager:RecordWrite("MonsterWarp", "Position")
+                           myRoot.CFrame = CFrame.new(from) * (faceCF - faceCF.Position)
+                           monsterLastMoveAt = now
+                        end
+                     end
+                  end
+               end
+            end
+            monsterMoveMode = "WALK"
+            return true, distance
+         end
+      end
+
+      if monsterMoveMode == "WALK" then
+         local hum = character and character:FindFirstChildOfClass("Humanoid")
+         if hum then pcall(function() hum:Move(Vector3.zero, false) end) end
+         monsterMoveMode = "GLIDE"
+      end
+
+      if now - monsterLastMoveAt < MONSTER_MOVE_COOLDOWN then
+         return false, "cooldown"
+      end
+
+      -- FAR / AERIAL: soft glide + hop clamp
       local maxStep = MONSTER_GLIDE_SPEED * dt
       if distance > maxStep and distance > 1e-4 then
          desiredPos = from + delta.Unit * maxStep
          delta = desiredPos - from
          distance = maxStep
       end
-      -- hard safety clamp (anti-kick)
       if distance > MONSTER_WARP_MAX_HOP and distance > 1e-4 then
          desiredPos = from + delta.Unit * MONSTER_WARP_MAX_HOP
          distance = MONSTER_WARP_MAX_HOP
       end
-      -- Y handling: ground stick only when not aerial (dodge / high escape)
       if (not aerial) and MONSTER_GROUND_STICK then
          local gy = monsterGroundY(desiredPos, { character, targetModel })
          if math.abs(gy - desiredPos.Y) < 18 then
             desiredPos = Vector3.new(desiredPos.X, gy, desiredPos.Z)
          end
       end
-      -- blend: softer overall, less aggressive when close (ลดกระตุก)
       local farFactor = math.clamp(distance / 28, 0, 1)
       local alphaH = math.clamp(MONSTER_HORIZONTAL_LERP + farFactor * 0.18, 0.12, 0.58)
       local alphaV = aerial
@@ -3750,7 +3813,6 @@ local okMonster, errMonster = pcall(function()
       end
       ResourceManager:RecordWrite("MonsterWarp", "Velocity")
       if aerial then
-         -- keep a little upward carry while dodging; kill horizontal drift
          local v = myRoot.AssemblyLinearVelocity
          myRoot.AssemblyLinearVelocity = Vector3.new(0, math.max(v.Y, 0) * 0.35, 0)
       else
@@ -3760,6 +3822,7 @@ local okMonster, errMonster = pcall(function()
       ResourceManager:RecordWrite("MonsterWarp", "Position")
       myRoot.CFrame = newCF
       monsterLastMoveAt = now
+      monsterMoveMode = "GLIDE"
       return true, distance
     end
     function MonsterMove:SetState(state, message)
@@ -3839,12 +3902,16 @@ local okMonster, errMonster = pcall(function()
         states.MonsterWarp = false
         local speedCharacter = monsterSpeedCharacter
         local speedHumanoid = speedCharacter and speedCharacter:FindFirstChildOfClass("Humanoid")
-        if speedHumanoid and monsterSavedWalkSpeed ~= nil then
-            pcall(function() speedHumanoid.WalkSpeed = monsterSavedWalkSpeed end)
+        if speedHumanoid then
+            pcall(function() speedHumanoid:Move(Vector3.zero, false) end)
+            if monsterSavedWalkSpeed ~= nil then
+                pcall(function() speedHumanoid.WalkSpeed = monsterSavedWalkSpeed end)
+            end
         end
         monsterSavedWalkSpeed = nil
         monsterSpeedCharacter = nil
         monsterAppliedWalkSpeed = nil
+        monsterMoveMode = "GLIDE" 
         monsterCurrent = nil
         monsterLastRoot = nil
         monsterTrackedTarget = nil
