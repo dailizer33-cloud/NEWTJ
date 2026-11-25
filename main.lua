@@ -664,11 +664,60 @@ end
 local State = Main.State
 if type(State) ~= "table" then State = {}; Main.State = State end
 if State.originalWalkSpeed == nil then State.originalWalkSpeed = Main.originalWalkSpeed end
-if State.isBusy == nil then State.isBusy = Main.isBusy == true end
--- Legacy feature modules keep the same table references. Scalar runtime values
--- are stored in State and mirrored to legacy fields only when changed.
+if State.isBusy == nil then State.isBusy = false end
+State.busyOwner = State.isBusy and State.busyOwner or nil
+function Main:IsBusy()
+    return self.State.isBusy == true
+end
+function Main:SetBusy(value, owner)
+    local busy = value == true
+    self.State.isBusy = busy
+    self.State.busyOwner = busy and tostring(owner or "UNKNOWN") or nil
+    return busy
+end
+function Main:IsMovementActive()
+    if type(_tjMovementController) == "table" then
+        return _tjMovementController:IsActive()
+    end
+    return false
+end
+function Main:GetMovementOwner()
+    if type(_tjMovementController) == "table" then
+        return _tjMovementController:GetOwner()
+    end
+    return nil
+end
+function Main:CanAct()
+    return not self:IsBusy() and not self:IsMovementActive()
+end
+function Main:CheckStaleBusy()
+    local state = self.State
+    if state.isBusy == true then
+        local owner = state.busyOwner
+        if owner == "MM2" then
+            if type(TargetService) == "table" then
+                if TargetService.Source ~= "deathnote" and TargetService.Source ~= "warp" then
+                    self:SetBusy(false, "stale_busy_cleanup")
+                    return true
+                end
+            end
+        end
+    end
+    return false
+end
+function Main:CheckStaleMovement()
+    if type(_tjMovementController) == "table" then
+        return _tjMovementController:CheckStaleState()
+    end
+    return false
+end
+function Main:CheckAllStaleState()
+    local busyStale = self:CheckStaleBusy()
+    local movementStale = self:CheckStaleMovement()
+    return busyStale or movementStale
+end
 Main.config, Main.states = config, states
-Main.originalWalkSpeed, Main.isBusy = State.originalWalkSpeed, State.isBusy
+Main.originalWalkSpeed = State.originalWalkSpeed
 TJ.Main = Main
 -- TAYJAY MOVEMENT CONTROLLER V1
 -- Grants one movement writer at a time and tracks the owner of shared locks/platforms.
@@ -815,6 +864,20 @@ function _tjMovementController:ForceClear(reason)
     self.LastStopReason = tostring(reason or "RESET")
     return true
 end
+function _tjMovementController:GetOwner()
+    return self.Owner
+end
+function _tjMovementController:IsActive()
+    return self.Owner ~= nil and not self.Transition
+end
+function _tjMovementController:CheckStaleState()
+    local inferred = _tjInferMovementOwner()
+    local current = self.Owner
+    if inferred ~= current and inferred ~= nil and current ~= nil then
+        return true, "inferred: " .. tostring(inferred) .. ", current: " .. tostring(current)
+    end
+    return false
+end
 end -- [/TAYJAY MOVEMENT CONTROLLER LOCAL-LIMIT SCOPE]
 -- =========================================================
 -- TAYJAY TARGET SERVICE V2
@@ -955,7 +1018,20 @@ function TargetService:Lock(player, source)
     self:EnsureCombatOwner()
     return true
 end
-function TargetService:Unlock(reason)
+function TargetService:Unlock(reason, expectedSource)
+    local currentSource = self.Source
+    local reasonText = tostring(reason or "")
+    if expectedSource and currentSource ~= expectedSource then
+        return false, "source_mismatch"
+    end
+    if reasonText == "warp_mode" and currentSource ~= "deathnote" then
+        return false, "warp_mode requires deathnote source"
+    end
+    if reasonText == "warp_off" or reasonText == "movement_owner_switch" then
+        if currentSource ~= "warp" then
+            return false, "warp_off/movement_owner_switch requires warp source"
+        end
+    end
     local previous = self:Get()
     self.Player = nil
     self.Source = "none"
@@ -969,6 +1045,18 @@ function TargetService:Unlock(reason)
         self:StopCombatOwner(reason or "unlock")
     end
     notify("unlock", previous)
+    return true
+end
+function TargetService:Reset(reason)
+    local previous = self:Get()
+    self.Player = nil
+    self.Source = "none"
+    self.Locked = false
+    self.Released = true
+    mirrorLegacy()
+    statesRef.DNWarp = false
+    self:StopCombatOwner(reason or "reset")
+    notify("reset", previous)
     return true
 end
 function TargetService:SetTransient(player, source)
@@ -1114,10 +1202,7 @@ function TargetService:EnsureCombatOwner()
         if type(attackFn) ~= "function" then
             return
         end
-        -- Busy state is read only from the canonical app-state table.
-        -- Do not depend on an undeclared/global isBusy variable.
-        local state = Main.State
-        local busy = (state and state.isBusy == true) or Main.isBusy == true
+        local busy = Main:IsBusy()
         if busy then
             return
         end
@@ -1153,6 +1238,7 @@ end
 _tjTargetEnv.TAYJAY_TARGET = TargetService
 TJ.TargetService = TargetService
 Main.TargetService = TargetService
+TargetService:Reset("STARTUP_RESET")
 -- Resource declarations: descriptive only in Monitor Mode.
 ResourceManager:Register({ id = "Speed", writes = { "WalkSpeed" }, priority = 10 })
 ResourceManager:Register({ id = "Fly", writes = { "Position", "HumanoidFlags", "AnimateState" }, priority = 30 })
@@ -2663,7 +2749,7 @@ local shadowThread = task.spawn(function()
         end
         local shadowEnabled = states.KillAura or states.DNWarp
         local warpActive = states.KillAura or states.DNWarp
-        if warpActive and not isBusy then
+        if warpActive and not Main:IsBusy() then
             startWarpPhysicsConnections()
             task.wait(SHADOW_UPDATE_INTERVAL)
         else
@@ -2723,7 +2809,7 @@ local shadowThread = task.spawn(function()
         end
         if not shadowEnabled then
             stopShadowHunterVisuals()
-        elseif isBusy then
+        elseif Main:IsBusy() then
             if shadowHiddenCharacter then
                 setInvisibility(shadowHiddenCharacter, false)
                 shadowHiddenCharacter = nil
@@ -3873,6 +3959,9 @@ local okMonster, errMonster = pcall(function()
         destroyMonsterPlatform()
         if _tjMovementController then
             _tjMovementController:Release("MONSTER")
+        end
+        if type(TargetService) == "table" then
+            pcall(function() TargetService:Unlock("movement_owner_switch") end)
         end
         updateMonsterWarpVisual()
     end
@@ -5431,13 +5520,13 @@ do
         return "Unknown", Color3.fromRGB(255, 215, 95), "❔", 4
     end
     local function teleportAndAttack(targetPlayer)
-        if isBusy or flyNowe or states.Fly or targetPlayer == LocalPlayer then return end
+        if Main:IsBusy() or flyNowe or states.Fly or targetPlayer == LocalPlayer then return end
         local character = LocalPlayer.Character
         local root = character and character:FindFirstChild("HumanoidRootPart")
         local targetCharacter = targetPlayer.Character
         local targetRoot = targetCharacter and targetCharacter:FindFirstChild("HumanoidRootPart")
         if not (root and targetRoot) then return end
-        isBusy = true
+        Main:SetBusy(true, "MM2")
         local followConnection = nil
         local ok, err = pcall(function()
             local originalCFrame = root.CFrame
@@ -5482,7 +5571,7 @@ do
             pcall(function() followConnection:Disconnect() end)
             followConnection = nil
         end
-        isBusy = false
+        Main:SetBusy(false, "MM2")
         if not ok then warn("[TAYJAY MM2] Follow action stopped: " .. tostring(err)) end
     end
     local mm2ESPEnabled = false
@@ -6695,6 +6784,11 @@ _G.TAYJAY_STOP_ALL = function()
         if type(_G.TAYJAY_WARP_STOP_NOW) == "function" then _G.TAYJAY_WARP_STOP_NOW(true) end
     end)
     -- Stop every registered Owner only after movement cleanup has completed.
+    pcall(function()
+        if TargetService and TargetService.Reset then
+            TargetService:Reset("STOP_ALL")
+        end
+    end)
     pcall(function()
         if ResourceManager and ResourceManager.StopAllOwners then
             ResourceManager:StopAllOwners("STOP_ALL")
