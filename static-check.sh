@@ -8,7 +8,10 @@ FILE="${1:-main.lua}"
 fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 pass() { printf 'PASS: %s\n' "$1"; }
 has()  { grep -qF -- "$2" <<<"$1"; }          # has "<text>" "<fixed string>"
-line_of() { grep -nF -- "$2" <<<"$1" | head -n1 | cut -d: -f1; }
+# line_of: first matching line number, or empty if none.
+# `|| true` + `-m1` so that no match / SIGPIPE does not abort the script under
+# `set -e -o pipefail` before the friendly `fail` message below can print.
+line_of() { { grep -nFm1 -- "$2" <<<"$1" || true; } | cut -d: -f1; }
 
 [ -f "$FILE" ] || fail "file not found: $FILE"
 
@@ -85,6 +88,7 @@ pass 'WARP activation releases only a Death Note-owned target; WARP shutdown gua
 grep -qF 'TargetService:Reset("STARTUP_RESET")' "$FILE" \
   || fail 'startup persistent-target reset missing'
 stopall="$(sed -n '/_G.TAYJAY_STOP_ALL = function()/,/print("\[TAYJAY\] STOP ALL completed/p' "$FILE")"
+[ -n "$stopall" ] || fail 'STOP ALL section not found'
 reset_line="$(line_of "$stopall" 'TargetService:Reset("STOP_ALL")')"
 owners_line="$(line_of "$stopall" 'ResourceManager:StopAllOwners("STOP_ALL")')"
 [ -n "$reset_line" ] && [ -n "$owners_line" ] && [ "$reset_line" -lt "$owners_line" ] \
