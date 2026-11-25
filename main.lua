@@ -3886,103 +3886,140 @@ local okMonster, errMonster = pcall(function()
         monsterResumeGeneration = monsterResumeGeneration + 1
         stopMonsterWarp(true)
     end
-    -- Farm-derived combat input: locate BITE and Q/E buttons in the same ScreenGui.
-    local function farmTapButton(button)
-        if not button or not button.Parent or not button.Visible then return false end
-        local fired = false
-        if typeof(getconnections) == "function" then
-            for _, eventName in ipairs({"Activated", "MouseButton1Click"}) do
-                local ok, signal = pcall(function() return button[eventName] end)
-                if ok and signal then
-                    local got, connections = pcall(getconnections, signal)
-                    if got and type(connections) == "table" then
-                        for _, connection in ipairs(connections) do
-                            if pcall(function() connection:Fire() end) then fired = true end
-                        end
-                    end
-                end
-            end
+
+    -- =========================================================
+    -- SKILL HYBRID (from spy logs 2026-11-25) - remote fire, not GUI tap
+    -- =========================================================
+    local SkillHybrid = { BiteCooldown = 0.62, MoveCooldown = 10.5, _lastBite = 0, _lastMove = 0, _remotes = nil }
+    local function skillGetRemotes()
+        if SkillHybrid._remotes then return SkillHybrid._remotes end
+        local folder = ReplicatedStorage:FindFirstChild("AntRemotes")
+        if not folder then
+            local ok, f = pcall(function() return ReplicatedStorage:WaitForChild("AntRemotes", 3) end)
+            if ok then folder = f end
         end
-        if pcall(function() button:Activate() end) then fired = true end
-        return fired
+        if not folder then return nil end
+        SkillHybrid._remotes = {
+            Bite = folder:FindFirstChild("Bite"),
+            Move = folder:FindFirstChild("Move"),
+            Evolve = folder:FindFirstChild("Evolve"),
+            Collect = folder:FindFirstChild("Collect"),
+        }
+        return SkillHybrid._remotes
     end
-    local farmBiteButton, farmSkillButtons, farmGuiScanAt = nil, {}, 0
-    local function farmFindCombatButtons()
-        local now = os.clock()
-        if now - farmGuiScanAt < 1.5 and farmBiteButton and farmBiteButton.Parent then
-            return farmBiteButton, farmSkillButtons
-        end
-        farmGuiScanAt = now
-        local playerGui = LocalPlayer:FindFirstChildOfClass("PlayerGui")
-        if not playerGui then return nil, {} end
-        local buttons = {}
-        for _, obj in ipairs(playerGui:GetDescendants()) do
-            if (obj:IsA("TextButton") or obj:IsA("ImageButton")) and obj.Visible
-                and obj.AbsoluteSize.X > 10 and obj.AbsoluteSize.Y > 10 then
-                local label = string.upper(tostring(obj.Name) .. " " .. tostring(obj:IsA("TextButton") and obj.Text or ""))
-                if label:find("BITE", 1, true) or label:find("ATTACK", 1, true) then farmBiteButton = obj end
-                buttons[#buttons+1] = {button=obj, label=label, gui=obj:FindFirstAncestorOfClass("ScreenGui"),
-                    pos=obj.AbsolutePosition + obj.AbsoluteSize/2}
-            end
-        end
-        farmSkillButtons = {}
-        if farmBiteButton then
-            local gui = farmBiteButton:FindFirstAncestorOfClass("ScreenGui")
-            local bitePos = farmBiteButton.AbsolutePosition + farmBiteButton.AbsoluteSize/2
-            local candidates = {}
-            for _, entry in ipairs(buttons) do
-                if entry.button ~= farmBiteButton and entry.gui == gui and entry.pos.Y < bitePos.Y - 8
-                    and math.abs(entry.pos.X-bitePos.X) <= 150 and (entry.pos-bitePos).Magnitude <= 210
-                    and not entry.label:find("RUN",1,true) and not entry.label:find("JUMP",1,true)
-                    and not entry.label:find("MENU",1,true) and not entry.label:find("BITE",1,true) then
-                    candidates[#candidates+1] = entry
-                end
-            end
-            table.sort(candidates,function(a,b)
-                if math.abs(a.pos.Y-b.pos.Y)>12 then return a.pos.Y<b.pos.Y end
-                return a.pos.X<b.pos.X
-            end)
-            farmSkillButtons[1] = candidates[1] and candidates[1].button
-            farmSkillButtons[2] = candidates[2] and candidates[2].button
-        end
-        return farmBiteButton, farmSkillButtons
+    local function skillAsNetworkId(value)
+        if type(value) == "number" and value < 0 then return value end
+        return nil
     end
-    -- Farm-style touch collection. No guessed Collect IDs are sent to the server.
-    local farmOrbLastScan, farmOrbTouchAt = 0, 0
+    local function skillLookDirection()
+        local char = LocalPlayer.Character
+        local root = char and (char:FindFirstChild("HumanoidRootPart") or char.PrimaryPart)
+        if not root then return Vector3.new(0, 0, -1) end
+        local look = root.CFrame.LookVector
+        local flat = Vector3.new(look.X, 0, look.Z)
+        if flat.Magnitude < 0.05 then return Vector3.new(0, 0, -1) end
+        return flat.Unit
+    end
+    local function skillDirectionTo(targetPos)
+        local char = LocalPlayer.Character
+        local root = char and (char:FindFirstChild("HumanoidRootPart") or char.PrimaryPart)
+        if not root then return skillLookDirection() end
+        local delta = targetPos - root.Position
+        local flat = Vector3.new(delta.X, 0, delta.Z)
+        if flat.Magnitude < 0.05 then return skillLookDirection() end
+        return flat.Unit
+    end
+    local function skillFireBite(targetId)
+        local rem = skillGetRemotes()
+        if not rem or not rem.Bite then return false end
+        local t = os.clock()
+        if t - SkillHybrid._lastBite < SkillHybrid.BiteCooldown then return false end
+        local ok = pcall(function()
+            rem.Bite:FireServer(skillAsNetworkId(targetId))
+        end)
+        if ok then SkillHybrid._lastBite = t end
+        return ok
+    end
+    local function skillFireMove(direction, targetId)
+        local rem = skillGetRemotes()
+        if not rem or not rem.Move then return false end
+        local t = os.clock()
+        if t - SkillHybrid._lastMove < SkillHybrid.MoveCooldown then return false end
+        if typeof(direction) ~= "Vector3" or direction.Magnitude < 0.001 then
+            direction = skillLookDirection()
+        else
+            direction = direction.Unit
+        end
+        local ok = pcall(function()
+            rem.Move:FireServer(direction, skillAsNetworkId(targetId))
+        end)
+        if ok then SkillHybrid._lastMove = t end
+        return ok
+    end
+    local function skillFireMoveAtTarget()
+        local targetRoot = nil
+        if monsterCurrent and monsterCurrent.root and monsterCurrent.root.Parent then
+            targetRoot = monsterCurrent.root
+        end
+        if targetRoot then
+            return skillFireMove(skillDirectionTo(targetRoot.Position), nil)
+        end
+        return skillFireMove(skillLookDirection(), nil)
+    end
+    pcall(function()
+        local env = _G
+        if type(getgenv) == "function" then
+            local g = getgenv()
+            if type(g) == "table" then env = g end
+        end
+        env.TAYJAY_SKILL_HYBRID = SkillHybrid
+        if type(env.TJ) ~= "table" then env.TJ = {} end
+        env.TJ.SkillHybrid = SkillHybrid
+        SkillHybrid.FireBite = skillFireBite
+        SkillHybrid.FireMove = skillFireMove
+        SkillHybrid.FireMoveAtTarget = skillFireMoveAtTarget
+    end)
+
+
+    local farmOrbTouchAt = 0
     local function farmCollectNearbyOrbs()
-        local now = os.clock()
-        if now-farmOrbLastScan < 0.8 or now-farmOrbTouchAt < 0.18 then return end
-        farmOrbLastScan = now
-        if typeof(firetouchinterest) ~= "function" then return end
         local character = LocalPlayer.Character
-        local root = character and character:FindFirstChild("HumanoidRootPart")
+        if not character then return end
+        local root = character:FindFirstChild("HumanoidRootPart") or character.PrimaryPart
         if not root then return end
+        local now = os.clock()
+        if farmOrbTouchAt > 0 and now - farmOrbTouchAt < 0.35 then return end
         local count = 0
         for _, obj in ipairs(workspace:GetDescendants()) do
-            if obj:IsA("BasePart") and obj.Parent then
-                local name = string.lower(obj.Name or "")
-                if (name:find("orb",1,true) or name:find("buff",1,true) or name:find("powerup",1,true))
-                    and (obj:FindFirstChildWhichIsA("TouchTransmitter") or obj.CanTouch)
-                    and (obj.Position-root.Position).Magnitude <= 18 then
-                    pcall(firetouchinterest,root,obj,0)
-                    pcall(firetouchinterest,root,obj,1)
-                    count = count+1
-                    if count>=8 then break end
+            if count >= 8 then break end
+            if obj:IsA("BasePart") and obj.Parent and obj.Parent ~= character then
+                local n = string.lower(obj.Name .. " " .. (obj.Parent and obj.Parent.Name or ""))
+                if (n:find("orb", 1, true) or n:find("power", 1, true) or n:find("xp", 1, true)
+                    or n:find("energy", 1, true) or n:find("glow", 1, true))
+                    and (obj.Position - root.Position).Magnitude <= 12 then
+                    pcall(function()
+                        if firetouchinterest then
+                            firetouchinterest(root, obj, 0)
+                            firetouchinterest(root, obj, 1)
+                        end
+                    end)
+                    count = count + 1
                 end
             end
         end
-        if count>0 then farmOrbTouchAt=now end
+        if count > 0 then farmOrbTouchAt = now end
     end
-    -- Separate worker so input automation does not stall target scan or warp follow.
     task.spawn(function()
-        local nextBite,nextQ,nextE=0,0,0
+        local nextBite, nextMove = 0, 0
         while screenGui.Parent and not _G.TAYJAY_STOPPED do
-            if states.MonsterWarp and monsterFilterMode=="Monster" then
-                local now=os.clock()
-                local bite,skills=farmFindCombatButtons()
-                if now>=nextBite and bite then farmTapButton(bite); nextBite=now+0.14 end
-                if now>=nextQ and skills[1] then farmTapButton(skills[1]); nextQ=now+7 end
-                if now>=nextE and skills[2] then farmTapButton(skills[2]); nextE=now+9 end
+            if states.MonsterWarp and monsterFilterMode == "Monster" then
+                local now = os.clock()
+                if now >= nextBite then
+                    if skillFireBite(nil) then nextBite = now + 0.62 else nextBite = now + 0.2 end
+                end
+                if now >= nextMove then
+                    if skillFireMoveAtTarget() then nextMove = now + 10.5 else nextMove = now + 1 end
+                end
                 farmCollectNearbyOrbs()
             end
             task.wait(0.05)
@@ -4663,21 +4700,24 @@ local okRB, errRB = pcall(function()
         end))
     end
     local function biteOnce()
-        local now = os.clock()
-        if (not biteButton or not biteButton.Parent) and now - lastFindAt > 1.5 then
-            lastFindAt = now
-            biteButton = findBiteButton()
-            if biteButton then
-                pcall(function() print("[TAYJAY RAPID] attack button found: " .. biteButton:GetFullName()) end)
+        local SH = rawget(_G, "TAYJAY_SKILL_HYBRID")
+        if type(getgenv) == "function" then
+            pcall(function()
+                local g = getgenv()
+                if type(g) == "table" and type(g.TAYJAY_SKILL_HYBRID) == "table" then
+                    SH = g.TAYJAY_SKILL_HYBRID
+                end
+            end)
+        end
+        if type(SH) == "table" and type(SH.FireBite) == "function" then
+            if SH.FireBite(nil) then
+                lastMethod = "remote"
+                return true
             end
+            lastMethod = "CD/FAIL"
+            return false
         end
-        if not biteButton or not biteButton.Parent then lastMethod = "NO BUTTON" return false end
-        if RAPID_METHOD ~= "signal" and clickScreen(biteButton) then lastMethod = "touch" return true end
-        if RAPID_METHOD ~= "touch" and not signalBad then
-            lastSignalFireAt = os.clock()
-            if fireSignals(biteButton) then lastMethod = "signal" return true end
-        end
-        lastMethod = "NO INPUT"
+        lastMethod = "NO SKILL"
         return false
     end
     local function scanStun()
