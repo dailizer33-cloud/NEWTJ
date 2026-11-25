@@ -1,0 +1,4 @@
+---
+ title: Add realistic human-like movement with natural sway and smooth transitions
+ description: Improves MonsterWarp movement to be less stiff/robotic by adding idle sway, smoother facing, and subtle randomness
+ --

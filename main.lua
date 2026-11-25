@@ -2507,17 +2507,84 @@ local function startWarpPhysicsConnections()
             if (_G.TAYJAY_WARP_HOLD_UNTIL or 0) > os.clock() then return end
             local myChar = LocalPlayer.Character
             local myRootNow = myChar and myChar:FindFirstChild("HumanoidRootPart")
+            local myHum = myChar and myChar:FindFirstChildOfClass("Humanoid")
             local tChar = f.player.Character
             local tRoot = tChar and tChar:FindFirstChild("HumanoidRootPart")
             local tHum = tChar and tChar:FindFirstChildOfClass("Humanoid")
-            if not myRootNow or not tRoot or not tHum or tHum.Health <= 0 then return end
+            if not myRootNow or not myHum or not tRoot or not tHum or tHum.Health <= 0 then return end
             if not _tjMovementController or not _tjMovementController:IsOwner("PLAYER_WARP") then return end
+            
             _tjMovementController:SetPositionLock("PLAYER_WARP", os.clock() + 0.3)
-            ResourceManager:RecordWrite("ShadowHunter", "Velocity")
-            myRootNow.AssemblyLinearVelocity = Vector3.zero
-            myRootNow.AssemblyAngularVelocity = Vector3.zero
-            ResourceManager:RecordWrite("ShadowHunter", "Position")
-            myRootNow.CFrame = tRoot.CFrame * FOLLOW_OFFSET
+            
+            -- Calculate direction to target
+            local delta = tRoot.Position - myRootNow.Position
+            local horizDelta = Vector3.new(delta.X, 0, delta.Z)
+            local distance = horizDelta.Magnitude
+            
+            -- Use virtual joystick for smooth movement instead of direct teleport
+            if distance > 2.0 then
+                -- Far away: use smooth hop toward target
+                local hop = math.min(distance, 30) -- Reduced hop distance for smoother approach
+                local dest = myRootNow.Position + horizDelta.Unit * hop
+                
+                -- Ground stick for natural movement
+                local gy = monsterGroundY and monsterGroundY(dest, { myChar, tChar }) or dest.Y
+                if math.abs(gy - dest.Y) < 18 then
+                    dest = Vector3.new(dest.X, gy, dest.Z)
+                end
+                
+                ResourceManager:RecordWrite("ShadowHunter", "Velocity")
+                myRootNow.AssemblyLinearVelocity = Vector3.zero
+                myRootNow.AssemblyAngularVelocity = Vector3.zero
+                ResourceManager:RecordWrite("ShadowHunter", "Position")
+                myRootNow.CFrame = CFrame.lookAt(dest, tRoot.Position)
+                
+                -- Move humanoid in the direction
+                pcall(function()
+                    myHum:Move(horizDelta.Unit, false)
+                end)
+            else
+                -- Close: use virtual joystick only (no teleport)
+                ResourceManager:RecordWrite("ShadowHunter", "Velocity")
+                myRootNow.AssemblyLinearVelocity = Vector3.zero
+                myRootNow.AssemblyAngularVelocity = Vector3.zero
+                
+                -- Smooth facing toward target
+                local currentLook = Vector3.new(myRootNow.CFrame.LookVector.X, 0, myRootNow.CFrame.LookVector.Z)
+                if currentLook.Magnitude > 0.05 then
+                    currentLook = currentLook.Unit
+                    local targetLook = horizDelta.Unit
+                    local dot = currentLook:Dot(targetLook)
+                    
+                    if dot < 0.95 then
+                        -- Slerp for smooth rotation
+                        local angle = math.acos(math.clamp(dot, -1, 1))
+                        local smoothAngle = angle * 0.3 -- Smoother rotation
+                        local sinAngle = math.sin(smoothAngle)
+                        local cosAngle = math.cos(smoothAngle)
+                        local perp = currentLook:Cross(targetLook)
+                        if perp.Magnitude > 0.001 then
+                            perp = perp.Unit
+                        end
+                        local newLook = currentLook * cosAngle + perp * sinAngle + targetLook * (1 - cosAngle)
+                        
+                        local face = myRootNow.Position + newLook
+                        ResourceManager:RecordWrite("ShadowHunter", "Position")
+                        myRootNow.CFrame = CFrame.lookAt(myRootNow.Position, Vector3.new(face.X, myRootNow.Position.Y, face.Z))
+                    end
+                end
+                
+                -- Move toward target with virtual joystick
+                if distance > 0.5 then
+                    pcall(function()
+                        myHum:Move(horizDelta.Unit, false)
+                    end)
+                else
+                    pcall(function()
+                        myHum:Move(Vector3.zero, false)
+                    end)
+                end
+            end
         end)
         if warpRuntimeOwner then warpRuntimeOwner:Own(warpHeartbeatConnection) end
     end
@@ -3137,8 +3204,17 @@ local okMonster, errMonster = pcall(function()
     local MONSTER_VJOY_MOVE_EPS = 0.04      -- only re-send Move if dir changed
     local MONSTER_VJOY_FACE_DOT = 0.88      -- re-face when look drifts below this
     local MONSTER_VJOY_FACE_CD = 0.12       -- min seconds between face writes
+    -- HUMAN-LIKE MOVEMENT: natural sway and smooth transitions
+    local MONSTER_IDLE_SWAY_AMOUNT = 0.3    -- subtle side-to-side sway when idle (studs)
+    local MONSTER_IDLE_SWAY_SPEED = 0.8     -- sway oscillation speed (rad/s)
+    local MONSTER_IDLE_BOUNCE_AMOUNT = 0.15 -- subtle up-down bounce when idle (studs)
+    local MONSTER_IDLE_BOUNCE_SPEED = 1.2   -- bounce oscillation speed (rad/s)
+    local MONSTER_FACE_SMOOTH_SPEED = 4.0   -- smoother facing rotation (lower = smoother)
+    local MONSTER_MOVEMENT_NOISE = 0.05     -- subtle randomness in movement direction
     local monsterLastMoveAt = 0
     local monsterLastFaceAt = 0
+    local monsterIdleSwayPhase = math.random() * 2 * math.pi
+    local monsterIdleBouncePhase = math.random() * 2 * math.pi
     local monsterSavedWalkSpeed = nil
     local monsterSpeedCharacter = nil
     local monsterAppliedWalkSpeed = nil
@@ -3798,12 +3874,23 @@ local okMonster, errMonster = pcall(function()
          return false, "no-humanoid"
       end
 
+      -- Add subtle movement noise for more natural, human-like movement
+      local nowTime = os.clock()
+      local movementNoise = MONSTER_MOVEMENT_NOISE
+      
       local raw = Vector3.zero
       if horizDist > MONSTER_VJOY_DEADZONE then
          raw = horiz.Unit
          if horizDist < 4 then
             local t = math.clamp((horizDist - MONSTER_VJOY_DEADZONE) / (4 - MONSTER_VJOY_DEADZONE), 0, 1)
             raw = raw * t
+         end
+         -- Add subtle randomness to movement direction
+         if movementNoise > 0 then
+            local noiseX = (math.random() - 0.5) * movementNoise * 2
+            local noiseZ = (math.random() - 0.5) * movementNoise * 2
+            raw = raw + Vector3.new(noiseX, 0, noiseZ)
+            raw = raw.Unit * math.clamp(raw.Magnitude, 0, 1)
          end
       end
 
@@ -3825,18 +3912,59 @@ local okMonster, errMonster = pcall(function()
          monsterVjoyLastSent = monsterVjoyDirSmoothed
       end
 
+      -- Smooth facing with gradual rotation (no snapping)
       if horizDist > 1.0 and now - monsterLastFaceAt >= MONSTER_VJOY_FACE_CD then
          local want = horiz.Unit
          local flatLook = Vector3.new(current.LookVector.X, 0, current.LookVector.Z)
          if flatLook.Magnitude > 0.05 then
-            if flatLook.Unit:Dot(want) < MONSTER_VJOY_FACE_DOT then
-               local face = from + want
+            local dot = flatLook.Unit:Dot(want)
+            if dot < MONSTER_VJOY_FACE_DOT then
+               -- Calculate smooth rotation instead of direct snap
+               local currentLook = flatLook.Unit
+               local targetLook = want
+               local angle = math.acos(math.clamp(dot, -1, 1))
+               local smoothAngle = angle * math.min(MONSTER_FACE_SMOOTH_SPEED * dt, 1)
+               
+               -- Slerp (spherical interpolation) for smooth rotation
+               local sinAngle = math.sin(smoothAngle)
+               local cosAngle = math.cos(smoothAngle)
+               local perp = currentLook:Cross(targetLook)
+               if perp.Magnitude > 0.001 then
+                  perp = perp.Unit
+               end
+               local newLook = currentLook * cosAngle + perp * sinAngle + targetLook * (1 - cosAngle)
+               
+               local face = from + newLook
                ResourceManager:RecordWrite("MonsterWarp", "Position")
                myRoot.CFrame = CFrame.lookAt(from, Vector3.new(face.X, from.Y, face.Z))
                monsterLastFaceAt = now
                monsterLastMoveAt = now
             end
          end
+      end
+
+      -- Add natural idle sway and bounce when standing still (no movement input)
+      if monsterVjoyDirSmoothed.Magnitude < 0.01 and horizDist < 2.0 then
+         -- Update idle animation phases
+         monsterIdleSwayPhase = monsterIdleSwayPhase + MONSTER_IDLE_SWAY_SPEED * dt
+         monsterIdleBouncePhase = monsterIdleBouncePhase + MONSTER_IDLE_BOUNCE_SPEED * dt
+         
+         -- Calculate sway and bounce offsets
+         local swayOffset = math.sin(monsterIdleSwayPhase) * MONSTER_IDLE_SWAY_AMOUNT
+         local bounceOffset = math.sin(monsterIdleBouncePhase) * MONSTER_IDLE_BOUNCE_AMOUNT
+         
+         -- Apply subtle position offset for natural idle movement
+         if now - monsterLastMoveAt > 0.5 then  -- Only apply after standing for a moment
+            local swayVec = current.LookVector:Cross(Vector3.new(0, 1, 0)) * swayOffset
+            local newPos = from + swayVec + Vector3.new(0, bounceOffset, 0)
+            
+            ResourceManager:RecordWrite("MonsterWarp", "Position")
+            myRoot.CFrame = CFrame.new(newPos) * (current - current.Position)
+         end
+      else
+         -- Reset phases when moving
+         monsterIdleSwayPhase = math.random() * 2 * math.pi
+         monsterIdleBouncePhase = math.random() * 2 * math.pi
       end
 
       return true, distance
