@@ -214,11 +214,26 @@ warn = function(...)
             return
         end
         -- Filter: attempt to call nil
-        if lowerMsg:find("attempt to call a nil value") then
+        if lowerMsg:find("attempt to call a nil value") or lowerMsg:find("attempt to call") then
             return
         end
         -- Filter: destroyed script
         if lowerMsg:find("destroyed") and lowerMsg:find("script") then
+            return
+        end
+        -- Filter: Stack Begin/End spam
+        if lowerMsg:find("stack begin") or lowerMsg:find("stack end") then
+            return
+        end
+        -- Filter: Other script status messages (TopbarPlus, etc.)
+        if lowerMsg:find("running ") or lowerMsg:find(" by @") or
+           lowerMsg:find("loaded ") or lowerMsg:find("disabled local") or
+           lowerMsg:find("finding suitable spawn") or
+           lowerMsg:find("resolving backed up task") or
+           lowerMsg:find("waiting for chunk load") or
+           lowerMsg:find("resolved") or
+           lowerMsg:find("character is successfully loaded") or
+           lowerMsg:find("disabling") then
             return
         end
         -- Don't filter NEWTJ's own messages
@@ -250,6 +265,19 @@ print = function(...)
         end
         -- Filter: Accessory (Mesh) spam
         if message:find("Accessory (Mesh)") then
+            return
+        end
+        -- Filter: Other script status messages
+        local lowerMsg = string.lower(message)
+        if lowerMsg:find("running ") or lowerMsg:find(" by @") or
+           lowerMsg:find("loaded ") or lowerMsg:find("disabled local") or
+           lowerMsg:find("finding suitable spawn") or
+           lowerMsg:find("resolving backed up task") or
+           lowerMsg:find("waiting for chunk load") or
+           lowerMsg:find("^resolved$") or
+           lowerMsg:find("character is successfully loaded") or
+           lowerMsg:find("^disabling$") or
+           lowerMsg:find("topbarplus") then
             return
         end
     end
