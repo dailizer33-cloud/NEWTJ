@@ -53,21 +53,21 @@ jobs:
               r'Main\.originalWalkSpeed, Main\.isBusy = State\.originalWalkSpeed, State\.isBusy\n'
               r'TJ\.Main = Main'
           )
-          replacement = '''if State.originalWalkSpeed == nil then State.originalWalkSpeed = Main.originalWalkSpeed end
-if State.isBusy == nil then State.isBusy = false end
-State.busyOwner = State.isBusy and State.busyOwner or nil
-function Main:IsBusy()
-    return self.State.isBusy == true
-end
-function Main:SetBusy(value, owner)
-    local busy = value == true
-    self.State.isBusy = busy
-    self.State.busyOwner = busy and tostring(owner or "UNKNOWN") or nil
-    return busy
-end
-Main.config, Main.states = config, states
-Main.originalWalkSpeed = State.originalWalkSpeed
-TJ.Main = Main'''
+          replacement = ("if State.originalWalkSpeed == nil then State.originalWalkSpeed = Main.originalWalkSpeed end\n"
+              "if State.isBusy == nil then State.isBusy = false end\n"
+              "State.busyOwner = State.isBusy and State.busyOwner or nil\n"
+              "function Main:IsBusy()\n"
+              "    return self.State.isBusy == true\n"
+              "end\n"
+              "function Main:SetBusy(value, owner)\n"
+              "    local busy = value == true\n"
+              "    self.State.isBusy = busy\n"
+              "    self.State.busyOwner = busy and tostring(owner or 'UNKNOWN') or nil\n"
+              "    return busy\n"
+              "end\n"
+              "Main.config, Main.states = config, states\n"
+              "Main.originalWalkSpeed = State.originalWalkSpeed\n"
+              "TJ.Main = Main")
           s, n = bootstrap.subn(replacement, s, count=1)
           if n == 0 and 'function Main:SetBusy(value, owner)' not in s:
               raise SystemExit('Phase 19A bootstrap not found')
