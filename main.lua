@@ -236,6 +236,12 @@ warn = function(...)
            lowerMsg:find("disabling") then
             return
         end
+        -- Filter: LocalScript enumeration spam from OPF:R
+        if lowerMsg:find("all.localscript") or lowerMsg:find("players.ttay_jjay.playergui.opf:r") or
+           lowerMsg:find("updated.mainframe.pages") or
+           lowerMsg:match(".*%.localscript$") then
+            return
+        end
         -- Don't filter NEWTJ's own messages
         if lowerMsg:find("[tayjay") or lowerMsg:find("[taejay") then
             _tjOriginalWarn(...)
@@ -274,10 +280,14 @@ print = function(...)
            lowerMsg:find("finding suitable spawn") or
            lowerMsg:find("resolving backed up task") or
            lowerMsg:find("waiting for chunk load") or
-           lowerMsg:find("^resolved$") or
+           lowerMsg:find("resolved") or
            lowerMsg:find("character is successfully loaded") or
-           lowerMsg:find("^disabling$") or
-           lowerMsg:find("topbarplus") then
+           lowerMsg:find("disabling") or
+           lowerMsg:find("topbarplus") or
+           lowerMsg:find("all.localscript") or
+           lowerMsg:find("players.ttay_jjay.playergui.opf:r") or
+           lowerMsg:find("updated.mainframe.pages") or
+           lowerMsg:match(".*%.localscript$") then
             return
         end
     end
