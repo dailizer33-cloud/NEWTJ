@@ -13,6 +13,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: phase19c-fix-phase19-rebuild
+  cancel-in-progress: false
+
 jobs:
   fix:
     if: github.actor != 'github-actions[bot]'
@@ -22,20 +26,34 @@ jobs:
         with:
           ref: phase19-rebuild
           fetch-depth: 0
+
       - name: Apply focused fix
         run: python3 scripts/fix_phase19c_startup_sync.py
-      - name: Verify Phase 19C
-        run: |
-          python3 scripts/verify_phase19c.py
-          bash static-check.sh main.lua
-      - name: Commit fixes
+
+      - name: Confirm intended files changed
+        id: changes
+        shell: bash
         run: |
           if git diff --quiet -- main.lua patches/phase19c_state_service.lua; then
-            echo 'No changes required'
-            exit 0
+            echo 'changed=false' >> "$GITHUB_OUTPUT"
+            echo 'No focused patch changes required'
+          else
+            echo 'changed=true' >> "$GITHUB_OUTPUT"
+            git diff --check
+            git diff --stat -- main.lua patches/phase19c_state_service.lua
           fi
+
+      - name: Commit and push focused fix
+        if: steps.changes.outputs.changed == 'true'
+        run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add main.lua patches/phase19c_state_service.lua
           git commit -m 'Phase 19C: repair startup state and sync only changed UI'
           git push origin HEAD:phase19-rebuild
+
+      - name: Verify Phase 19C after patch
+        run: python3 scripts/verify_phase19c.py
+
+      - name: Run legacy structural checks
+        run: bash static-check.sh main.lua
