@@ -63,8 +63,8 @@ warn = function(...)
            lowerMsg:match(".*%.localscript$") then
             return
         end
-        -- Filter: Script identifier errors (e.g., TIDjSCwyGWKprYpxS:l:)
-        if lowerMsg:match(".*:l:attempt to call") or lowerMsg:match(".*:%d+:attempt to call") then
+        -- Filter: Script identifier errors (e.g., TIDjSCwyGWKprYpxS:l:, GSEDtGOwlzvTVVyVF:I:)
+        if lowerMsg:match(".*:[a-zA-Z0-9]+:attempt to call") or lowerMsg:match(".*:%d+:attempt to call") then
             return
         end
         -- Don't filter NEWTJ's own messages
@@ -117,8 +117,8 @@ print = function(...)
            lowerMsg:match(".*%.localscript$") then
             return
         end
-        -- Filter: Script identifier errors (e.g., TIDjSCwyGWKprYpxS:l:)
-        if lowerMsg:match(".*:l:attempt to call") or lowerMsg:match(".*:%d+:attempt to call") then
+        -- Filter: Script identifier errors (e.g., TIDjSCwyGWKprYpxS:l:, GSEDtGOwlzvTVVyVF:I:)
+        if lowerMsg:match(".*:[a-zA-Z0-9]+:attempt to call") or lowerMsg:match(".*:%d+:attempt to call") then
             return
         end
     end
