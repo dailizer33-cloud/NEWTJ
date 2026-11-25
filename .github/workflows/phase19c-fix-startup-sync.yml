@@ -1,0 +1,44 @@
+name: Phase 19C fix startup repair and UI sync
+
+on:
+  push:
+    branches: [phase19-rebuild]
+    paths:
+      - scripts/fix_phase19c_startup_sync.py
+      - .github/workflows/phase19c-fix-startup-sync.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: phase19-rebuild
+          fetch-depth: 0
+      - name: Apply focused fix
+        run: python3 scripts/fix_phase19c_startup_sync.py
+      - name: Verify focused invariants
+        run: |
+          grep -qF '"startup_repair"' main.lua
+          grep -qF 'local before = StateService:Snapshot()' main.lua
+          grep -qF 'if before[changedKey] ~= changedValue and uiSyncRegistry[changedKey] then' main.lua
+          if grep -qF 'for changedKey, changedValue in pairs(result) do' main.lua; then
+            echo 'stale full-snapshot UI sync remains' >&2
+            exit 1
+          fi
+      - name: Commit fixes
+        run: |
+          if git diff --quiet -- main.lua patches/phase19c_state_service.lua; then
+            echo 'No changes required'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add main.lua patches/phase19c_state_service.lua
+          git commit -m 'Phase 19C: repair startup state and sync only changed UI'
+          git push origin HEAD:phase19-rebuild
