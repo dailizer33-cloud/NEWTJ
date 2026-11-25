@@ -3120,18 +3120,14 @@ local okMonster, errMonster = pcall(function()
     local MONSTER_ORBIT_BREATH = 1.2   -- รัศมีแกว่งเข้า-ออก (studs) ให้จังหวะไม่คงที่
     local MONSTER_ORBIT_BOB = 0.8      -- แกว่งขึ้น-ลง (studs)
     local MONSTER_ENTER_SECONDS = 0.6  -- เข้า "สิงร่าง" (อยู่กลางตัวมอนสเตอร์) ก่อน แล้วค่อยขยายวงออกถึงรัศมีเต็มในเวลานี้
-    -- HYBRID MOVEMENT (anti-kick):
-    --   near  (<= MONSTER_WALK_NEAR): Humanoid WalkSpeed 60-80 + Move()
-    --   far   (>  MONSTER_WALK_NEAR): soft glide + hop clamp + ground stick
-    --   aerial/dodge: glide only
-    local MONSTER_WALK_SPEED_MIN = 60
-    local MONSTER_WALK_SPEED_MAX = 80
-    local MONSTER_WALK_NEAR = 28           -- studs horizontal: use walk mode
-    local MONSTER_GLIDE_SPEED = math.random(90, 110) -- studs/sec when far
+    -- VIRTUAL JOYSTICK MOVEMENT (full):
+    --   WalkSpeed fixed 80 + Humanoid:Move (no hybrid walk/glide blend)
+    --   Soft hop only when very far or dodging (anti-kick hop clamp)
+    --   Loot: warp-collect orb / acorn / buff / event (separate path)
+    local MONSTER_WALK_SPEED = 80          -- fixed
     local MONSTER_WARP_MAX_HOP = 36         -- max single hop (keep under ~40)
-    local MONSTER_MOVE_COOLDOWN = 0.03      -- min seconds between position writes (glide)
-    local MONSTER_HORIZONTAL_LERP = 0.18
-    local MONSTER_VERTICAL_LERP = 0.26
+    local MONSTER_MOVE_COOLDOWN = 0.03
+    local MONSTER_FAR_HOP = 55             -- use hop when farther than this
     local MONSTER_GROUND_STICK = true
     local MONSTER_GROUND_RAY = 14
     local MONSTER_GROUND_OFFSET = 2.2
@@ -3139,7 +3135,7 @@ local okMonster, errMonster = pcall(function()
     local monsterSavedWalkSpeed = nil
     local monsterSpeedCharacter = nil
     local monsterAppliedWalkSpeed = nil
-    local monsterMoveMode = "GLIDE"        -- "WALK" | "GLIDE"
+
 
     -- AUTO-DODGE: อ่านท่าที่มอนสเตอร์กำลังเล่น (AnimationTrack) ถ้าเป็นท่าโจมตี/สกิล → ลอยหนีขึ้นข้างบนชั่วคราว
     local MONSTER_DODGE_HEIGHT = 45     -- หนีขึ้นสูงจากตัวมอนสเตอร์ (studs)
@@ -3710,16 +3706,16 @@ local okMonster, errMonster = pcall(function()
          monsterSavedWalkSpeed = hum.WalkSpeed
          monsterSpeedCharacter = character
       end
-      local targetSpeed = math.random(MONSTER_WALK_SPEED_MIN, MONSTER_WALK_SPEED_MAX)
-      if monsterAppliedWalkSpeed ~= targetSpeed or hum.WalkSpeed ~= targetSpeed then
+      if monsterAppliedWalkSpeed ~= MONSTER_WALK_SPEED or hum.WalkSpeed ~= MONSTER_WALK_SPEED then
          pcall(function()
             ResourceManager:RecordWrite("MonsterWarp", "WalkSpeed")
-            hum.WalkSpeed = targetSpeed
+            hum.WalkSpeed = MONSTER_WALK_SPEED
          end)
-         monsterAppliedWalkSpeed = targetSpeed
+         monsterAppliedWalkSpeed = MONSTER_WALK_SPEED
       end
       return hum
     end
+    -- Full virtual joystick: WalkSpeed 80 + Move(). Soft hop only if far/dodge.
     local function monsterSoftApply(myRoot, desiredCF, character, targetModel, dt, aerial)
       local now = os.clock()
       dt = tonumber(dt) or 0.016
@@ -3732,98 +3728,80 @@ local okMonster, errMonster = pcall(function()
       local distance = delta.Magnitude
       local horiz = Vector3.new(delta.X, 0, delta.Z)
       local horizDist = horiz.Magnitude
+      local hum = monsterEnsureWalkSpeed(character)
 
-      -- NEAR: hybrid walk (WalkSpeed 60-80)
-      if (not aerial) and horizDist <= MONSTER_WALK_NEAR and distance > 0.35 then
-         local hum = monsterEnsureWalkSpeed(character)
-         if hum then
-            local dir = horizDist > 0.05 and horiz.Unit or Vector3.zero
-            pcall(function()
-               hum:Move(dir, false)
-            end)
-            if horizDist > 0.4 then
-               local face = from + Vector3.new(delta.X, 0, delta.Z)
-               if (face - from).Magnitude > 0.08 then
-                  local faceCF = CFrame.lookAt(from, Vector3.new(face.X, from.Y, face.Z))
-                  local flatLook = Vector3.new(current.LookVector.X, 0, current.LookVector.Z)
-                  local wantLook = Vector3.new(faceCF.LookVector.X, 0, faceCF.LookVector.Z)
-                  if flatLook.Magnitude > 0.05 and wantLook.Magnitude > 0.05 then
-                     if flatLook.Unit:Dot(wantLook.Unit) < 0.92 then
-                        if now - monsterLastMoveAt >= MONSTER_MOVE_COOLDOWN then
-                           ResourceManager:RecordWrite("MonsterWarp", "Position")
-                           myRoot.CFrame = CFrame.new(from) * (faceCF - faceCF.Position)
-                           monsterLastMoveAt = now
-                        end
+      -- DODGE / aerial: short vertical hop only
+      if aerial then
+         if now - monsterLastMoveAt < MONSTER_MOVE_COOLDOWN then
+            return false, "cooldown"
+         end
+         local hop = math.min(distance, MONSTER_WARP_MAX_HOP)
+         if hop > 0.05 and delta.Magnitude > 1e-4 then
+            local dest = from + delta.Unit * hop
+            ResourceManager:RecordWrite("MonsterWarp", "Velocity")
+            local v = myRoot.AssemblyLinearVelocity
+            myRoot.AssemblyLinearVelocity = Vector3.new(0, math.max(v.Y, 0) * 0.35, 0)
+            myRoot.AssemblyAngularVelocity = Vector3.zero
+            ResourceManager:RecordWrite("MonsterWarp", "Position")
+            myRoot.CFrame = CFrame.new(dest) * (current - current.Position)
+            monsterLastMoveAt = now
+         end
+         if hum then pcall(function() hum:Move(Vector3.zero, false) end) end
+         return true, distance
+      end
+
+      -- FAR: soft hop toward target (not walk-blend / not glide lerp)
+      if horizDist > MONSTER_FAR_HOP then
+         if now - monsterLastMoveAt < MONSTER_MOVE_COOLDOWN then
+            return false, "cooldown"
+         end
+         local hop = math.min(horizDist, MONSTER_WARP_MAX_HOP)
+         local step = horiz.Unit * hop
+         local dest = from + step
+         if MONSTER_GROUND_STICK then
+            local gy = monsterGroundY(dest, { character, targetModel })
+            if math.abs(gy - dest.Y) < 18 then
+               dest = Vector3.new(dest.X, gy, dest.Z)
+            end
+         end
+         local face = dest + horiz.Unit
+         ResourceManager:RecordWrite("MonsterWarp", "Velocity")
+         myRoot.AssemblyLinearVelocity = Vector3.zero
+         myRoot.AssemblyAngularVelocity = Vector3.zero
+         ResourceManager:RecordWrite("MonsterWarp", "Position")
+         myRoot.CFrame = CFrame.lookAt(dest, Vector3.new(face.X, dest.Y, face.Z))
+         monsterLastMoveAt = now
+         if hum then pcall(function() hum:Move(Vector3.zero, false) end) end
+         return true, distance
+      end
+
+      -- VIRTUAL JOYSTICK (full): fixed WalkSpeed 80 + Move
+      if hum then
+         local dir = horizDist > 0.08 and horiz.Unit or Vector3.zero
+         pcall(function()
+            hum:Move(dir, false)
+         end)
+         -- face target lightly (rotation only, no position write)
+         if horizDist > 0.5 then
+            local face = from + horiz
+            if (face - from).Magnitude > 0.08 then
+               local flatLook = Vector3.new(current.LookVector.X, 0, current.LookVector.Z)
+               local want = horiz.Unit
+               if flatLook.Magnitude > 0.05 then
+                  if flatLook.Unit:Dot(want) < 0.90 then
+                     if now - monsterLastMoveAt >= MONSTER_MOVE_COOLDOWN then
+                        ResourceManager:RecordWrite("MonsterWarp", "Position")
+                        myRoot.CFrame = CFrame.lookAt(from, Vector3.new(face.X, from.Y, face.Z))
+                        monsterLastMoveAt = now
                      end
                   end
                end
             end
-            monsterMoveMode = "WALK"
-            return true, distance
          end
+         return true, distance
       end
 
-      if monsterMoveMode == "WALK" then
-         local hum = character and character:FindFirstChildOfClass("Humanoid")
-         if hum then pcall(function() hum:Move(Vector3.zero, false) end) end
-         monsterMoveMode = "GLIDE"
-      end
-
-      if now - monsterLastMoveAt < MONSTER_MOVE_COOLDOWN then
-         return false, "cooldown"
-      end
-
-      -- FAR / AERIAL: soft glide + hop clamp
-      local maxStep = MONSTER_GLIDE_SPEED * dt
-      if distance > maxStep and distance > 1e-4 then
-         desiredPos = from + delta.Unit * maxStep
-         delta = desiredPos - from
-         distance = maxStep
-      end
-      if distance > MONSTER_WARP_MAX_HOP and distance > 1e-4 then
-         desiredPos = from + delta.Unit * MONSTER_WARP_MAX_HOP
-         distance = MONSTER_WARP_MAX_HOP
-      end
-      if (not aerial) and MONSTER_GROUND_STICK then
-         local gy = monsterGroundY(desiredPos, { character, targetModel })
-         if math.abs(gy - desiredPos.Y) < 18 then
-            desiredPos = Vector3.new(desiredPos.X, gy, desiredPos.Z)
-         end
-      end
-      local farFactor = math.clamp(distance / 28, 0, 1)
-      local alphaH = math.clamp(MONSTER_HORIZONTAL_LERP + farFactor * 0.18, 0.12, 0.58)
-      local alphaV = aerial
-         and math.clamp(MONSTER_VERTICAL_LERP + 0.18, 0.18, 0.72)
-         or math.clamp(MONSTER_VERTICAL_LERP + farFactor * 0.08, 0.10, 0.55)
-      local blended = Vector3.new(
-         from.X + (desiredPos.X - from.X) * alphaH,
-         from.Y + (desiredPos.Y - from.Y) * alphaV,
-         from.Z + (desiredPos.Z - from.Z) * alphaH
-      )
-      local look = desiredCF.LookVector
-      local facePoint = blended + Vector3.new(look.X, 0, look.Z)
-      if (facePoint - blended).Magnitude < 0.05 then
-         facePoint = blended + Vector3.new(delta.X, 0, delta.Z)
-      end
-      local newCF
-      if (Vector3.new(facePoint.X, blended.Y, facePoint.Z) - blended).Magnitude > 0.08 then
-         newCF = CFrame.lookAt(blended, Vector3.new(facePoint.X, blended.Y, facePoint.Z))
-      else
-         newCF = CFrame.new(blended) * (current - current.Position)
-      end
-      ResourceManager:RecordWrite("MonsterWarp", "Velocity")
-      if aerial then
-         local v = myRoot.AssemblyLinearVelocity
-         myRoot.AssemblyLinearVelocity = Vector3.new(0, math.max(v.Y, 0) * 0.35, 0)
-      else
-         myRoot.AssemblyLinearVelocity = Vector3.zero
-      end
-      myRoot.AssemblyAngularVelocity = Vector3.zero
-      ResourceManager:RecordWrite("MonsterWarp", "Position")
-      myRoot.CFrame = newCF
-      monsterLastMoveAt = now
-      monsterMoveMode = "GLIDE"
-      return true, distance
+      return false, "no-humanoid"
     end
     function MonsterMove:SetState(state, message)
       if self.State ~= state or self.Message ~= message then
@@ -4049,32 +4027,77 @@ local okMonster, errMonster = pcall(function()
 
 
     local farmOrbTouchAt = 0
-    local function farmCollectNearbyOrbs()
+    local FARM_LOOT_KEYWORDS = {
+        "orb", "acorn", "buff", "event", "power", "xp", "energy", "glow",
+        "capsule", "pickup", "token", "shard", "fruit", "apple", "nut",
+        "boost", "gift", "chest", "drop", "reward", "crystal", "gem",
+    }
+    local function farmIsLootName(name)
+        local n = string.lower(tostring(name or ""))
+        for _, key in ipairs(FARM_LOOT_KEYWORDS) do
+            if string.find(n, key, 1, true) then return true end
+        end
+        return false
+    end
+    -- Warp-collect: hop to nearby orb/acorn/buff/event then touch
+    local function farmWarpCollectLoot()
         local character = LocalPlayer.Character
         if not character then return end
         local root = character:FindFirstChild("HumanoidRootPart") or character.PrimaryPart
         if not root then return end
         local now = os.clock()
-        if farmOrbTouchAt > 0 and now - farmOrbTouchAt < 0.35 then return end
-        local count = 0
+        if farmOrbTouchAt > 0 and now - farmOrbTouchAt < 0.28 then return end
+        local best, bestDist = nil, 90
         for _, obj in ipairs(workspace:GetDescendants()) do
-            if count >= 8 then break end
             if obj:IsA("BasePart") and obj.Parent and obj.Parent ~= character then
-                local n = string.lower(obj.Name .. " " .. (obj.Parent and obj.Parent.Name or ""))
-                if (n:find("orb", 1, true) or n:find("power", 1, true) or n:find("xp", 1, true)
-                    or n:find("energy", 1, true) or n:find("glow", 1, true))
-                    and (obj.Position - root.Position).Magnitude <= 12 then
-                    pcall(function()
-                        if firetouchinterest then
-                            firetouchinterest(root, obj, 0)
-                            firetouchinterest(root, obj, 1)
-                        end
-                    end)
-                    count = count + 1
+                local label = obj.Name .. " " .. (obj.Parent and obj.Parent.Name or "")
+                if farmIsLootName(label) then
+                    local d = (obj.Position - root.Position).Magnitude
+                    if d < bestDist and d > 0.5 then
+                        best, bestDist = obj, d
+                    end
                 end
             end
         end
-        if count > 0 then farmOrbTouchAt = now end
+        if not best then return end
+        -- soft hop toward loot (anti-kick clamp)
+        local from = root.Position
+        local delta = best.Position - from
+        local hop = math.min(delta.Magnitude, MONSTER_WARP_MAX_HOP)
+        if hop > 1.2 and delta.Magnitude > 1e-4 then
+            local dest = from + delta.Unit * hop
+            if MONSTER_GROUND_STICK then
+                local gy = monsterGroundY(dest, { character })
+                if math.abs(gy - dest.Y) < 18 then
+                    dest = Vector3.new(dest.X, gy, dest.Z)
+                end
+            end
+            pcall(function()
+                ResourceManager:RecordWrite("MonsterWarp", "Position")
+                root.AssemblyLinearVelocity = Vector3.zero
+                root.CFrame = CFrame.new(dest, dest + Vector3.new(delta.X, 0, delta.Z))
+            end)
+            monsterLastMoveAt = now
+        end
+        -- touch / firetouch when close enough
+        if (best.Position - root.Position).Magnitude <= 14 then
+            pcall(function()
+                if firetouchinterest then
+                    firetouchinterest(root, best, 0)
+                    firetouchinterest(root, best, 1)
+                end
+            end)
+            local oid = best:GetAttribute("Id") or best:GetAttribute("OrbId")
+                or (best.Parent and (best.Parent:GetAttribute("Id") or best.Parent:GetAttribute("OrbId")))
+            if type(oid) == "number" then
+                pcall(function()
+                    local folder = ReplicatedStorage:FindFirstChild("AntRemotes")
+                    local col = folder and folder:FindFirstChild("Collect")
+                    if col then col:FireServer({ oid }) end
+                end)
+            end
+        end
+        farmOrbTouchAt = now
     end
     task.spawn(function()
         local nextBite, nextMove = 0, 0
@@ -4087,7 +4110,7 @@ local okMonster, errMonster = pcall(function()
                 if now >= nextMove then
                     if skillFireMoveAtTarget() then nextMove = now + 10.5 else nextMove = now + 1 end
                 end
-                farmCollectNearbyOrbs()
+                farmWarpCollectLoot()
             end
             task.wait(0.05)
         end
