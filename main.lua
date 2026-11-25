@@ -181,6 +181,91 @@ local _tjRunOK, _tjRunError = xpcall(function()
 -- TAYJAY STARTUP DIAGNOSTIC: must be the first executable statement.
 print("[TAYJAY BOOT] File entered; startup sequence begins.")
 print("[TAYJAY SHADOW HUNTER + DEATH NOTE WARP] Starting initialization...")
+
+-- =============================================
+-- [TAYJAY ERROR FILTER] - Filter Game Script Errors
+-- Purpose: Suppress console spam from game scripts (Invalid block id, HTTP 404, etc.)
+-- =============================================
+local _tjOriginalWarn = warn
+local _tjOriginalPrint = print
+local _tjErrorFilterEnabled = true
+
+-- Filter warn() messages
+warn = function(...)
+    if not _tjErrorFilterEnabled then
+        _tjOriginalWarn(...)
+        return
+    end
+    local messages = {...}
+    local message = type(messages[1]) == "string" and messages[1] or tostring(messages[1])
+    if #messages > 1 then
+        for i = 2, #messages do
+            message = message .. " " .. tostring(messages[i])
+        end
+    end
+    if type(message) == "string" then
+        local lowerMsg = string.lower(message)
+        -- Filter: Invalid block id
+        if lowerMsg:find("invalid block id") then
+            return
+        end
+        -- Filter: HTTP 404
+        if lowerMsg:find("http 404") or lowerMsg:find("404 not found") then
+            return
+        end
+        -- Filter: attempt to call nil
+        if lowerMsg:find("attempt to call a nil value") then
+            return
+        end
+        -- Filter: destroyed script
+        if lowerMsg:find("destroyed") and lowerMsg:find("script") then
+            return
+        end
+        -- Don't filter NEWTJ's own messages
+        if lowerMsg:find("[tayjay") or lowerMsg:find("[taejay") then
+            _tjOriginalWarn(...)
+            return
+        end
+    end
+    _tjOriginalWarn(...)
+end
+
+-- Filter print() for coordinate spam
+print = function(...)
+    if not _tjErrorFilterEnabled then
+        _tjOriginalPrint(...)
+        return
+    end
+    local messages = {...}
+    local message = type(messages[1]) == "string" and messages[1] or tostring(messages[1])
+    if #messages > 1 then
+        for i = 2, #messages do
+            message = message .. " " .. tostring(messages[i])
+        end
+    end
+    if type(message) == "string" then
+        -- Filter: Coordinate spam (e.g., "253.29, 338.99, 309.29")
+        if message:match("^%d+%.%d+,%s*%d+%.%d+,%s*%d+%.%d+$") then
+            return
+        end
+        -- Filter: Accessory (Mesh) spam
+        if message:find("Accessory (Mesh)") then
+            return
+        end
+    end
+    _tjOriginalPrint(...)
+end
+
+-- Function to toggle error filter (for debugging)
+_G.TAYJAY_TOGGLE_ERROR_FILTER = function(enable)
+    _tjErrorFilterEnabled = enable == nil and not _tjErrorFilterEnabled or enable
+    if _tjErrorFilterEnabled then
+        print("[TAYJAY] Error filter ENABLED - Game errors will be suppressed")
+    else
+        print("[TAYJAY] Error filter DISABLED - All errors will show")
+    end
+end
+
 if not game:IsLoaded() then
     pcall(function() game.Loaded:Wait() end)
 end
