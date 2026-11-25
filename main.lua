@@ -3131,10 +3131,20 @@ local okMonster, errMonster = pcall(function()
     local MONSTER_GROUND_STICK = true
     local MONSTER_GROUND_RAY = 14
     local MONSTER_GROUND_OFFSET = 2.2
+    -- VJOY_OPT: input tuning
+    local MONSTER_VJOY_DEADZONE = 0.12      -- ignore tiny direction noise
+    local MONSTER_VJOY_SMOOTH = 0.28        -- 0=snappy 1=very smooth (lerp alpha)
+    local MONSTER_VJOY_MOVE_EPS = 0.04      -- only re-send Move if dir changed
+    local MONSTER_VJOY_FACE_DOT = 0.88      -- re-face when look drifts below this
+    local MONSTER_VJOY_FACE_CD = 0.12       -- min seconds between face writes
     local monsterLastMoveAt = 0
+    local monsterLastFaceAt = 0
     local monsterSavedWalkSpeed = nil
     local monsterSpeedCharacter = nil
     local monsterAppliedWalkSpeed = nil
+    local monsterCachedHum = nil
+    local monsterVjoyDirSmoothed = Vector3.zero
+    local monsterVjoyLastSent = Vector3.zero
 
 
     -- AUTO-DODGE: อ่านท่าที่มอนสเตอร์กำลังเล่น (AnimationTrack) ถ้าเป็นท่าโจมตี/สกิล → ลอยหนีขึ้นข้างบนชั่วคราว
@@ -3699,13 +3709,34 @@ local okMonster, errMonster = pcall(function()
       return position.Y
     end
     local function monsterEnsureWalkSpeed(character)
-      if not character then return nil end
+      if not character then
+         monsterCachedHum = nil
+         return nil
+      end
+      if monsterSpeedCharacter == character and monsterCachedHum and monsterCachedHum.Parent then
+         local hum = monsterCachedHum
+         if monsterAppliedWalkSpeed ~= MONSTER_WALK_SPEED or hum.WalkSpeed ~= MONSTER_WALK_SPEED then
+            pcall(function()
+               ResourceManager:RecordWrite("MonsterWarp", "WalkSpeed")
+               hum.WalkSpeed = MONSTER_WALK_SPEED
+            end)
+            monsterAppliedWalkSpeed = MONSTER_WALK_SPEED
+         end
+         return hum
+      end
       local hum = character:FindFirstChildOfClass("Humanoid")
-      if not hum then return nil end
+      if not hum then
+         monsterCachedHum = nil
+         return nil
+      end
       if monsterSpeedCharacter ~= character or monsterSavedWalkSpeed == nil then
          monsterSavedWalkSpeed = hum.WalkSpeed
          monsterSpeedCharacter = character
       end
+      monsterCachedHum = hum
+      pcall(function()
+         hum.AutoRotate = true
+      end)
       if monsterAppliedWalkSpeed ~= MONSTER_WALK_SPEED or hum.WalkSpeed ~= MONSTER_WALK_SPEED then
          pcall(function()
             ResourceManager:RecordWrite("MonsterWarp", "WalkSpeed")
@@ -3715,12 +3746,10 @@ local okMonster, errMonster = pcall(function()
       end
       return hum
     end
-    -- Full virtual joystick: WalkSpeed 80 + Move(). Soft hop only if far/dodge.
     local function monsterSoftApply(myRoot, desiredCF, character, targetModel, dt, aerial)
       local now = os.clock()
       dt = tonumber(dt) or 0.016
-      if dt <= 0 then dt = 0.016 end
-      if dt > 0.1 then dt = 0.1 end
+      if dt <= 0 then dt = 0.016 elseif dt > 0.1 then dt = 0.1 end
       local current = myRoot.CFrame
       local from = current.Position
       local desiredPos = desiredCF.Position
@@ -3730,11 +3759,12 @@ local okMonster, errMonster = pcall(function()
       local horizDist = horiz.Magnitude
       local hum = monsterEnsureWalkSpeed(character)
 
-      -- DODGE / aerial: short vertical hop only
       if aerial then
          if now - monsterLastMoveAt < MONSTER_MOVE_COOLDOWN then
             return false, "cooldown"
          end
+         monsterVjoyDirSmoothed = Vector3.zero
+         monsterVjoyLastSent = Vector3.zero
          local hop = math.min(distance, MONSTER_WARP_MAX_HOP)
          if hop > 0.05 and delta.Magnitude > 1e-4 then
             local dest = from + delta.Unit * hop
@@ -3750,11 +3780,12 @@ local okMonster, errMonster = pcall(function()
          return true, distance
       end
 
-      -- FAR: soft hop toward target (not walk-blend / not glide lerp)
       if horizDist > MONSTER_FAR_HOP then
          if now - monsterLastMoveAt < MONSTER_MOVE_COOLDOWN then
             return false, "cooldown"
          end
+         monsterVjoyDirSmoothed = Vector3.zero
+         monsterVjoyLastSent = Vector3.zero
          local hop = math.min(horizDist, MONSTER_WARP_MAX_HOP)
          local step = horiz.Unit * hop
          local dest = from + step
@@ -3775,33 +3806,52 @@ local okMonster, errMonster = pcall(function()
          return true, distance
       end
 
-      -- VIRTUAL JOYSTICK (full): fixed WalkSpeed 80 + Move
-      if hum then
-         local dir = horizDist > 0.08 and horiz.Unit or Vector3.zero
+      if not hum then
+         return false, "no-humanoid"
+      end
+
+      local raw = Vector3.zero
+      if horizDist > MONSTER_VJOY_DEADZONE then
+         raw = horiz.Unit
+         if horizDist < 4 then
+            local t = math.clamp((horizDist - MONSTER_VJOY_DEADZONE) / (4 - MONSTER_VJOY_DEADZONE), 0, 1)
+            raw = raw * t
+         end
+      end
+
+      local a = 1 - math.exp(-math.max(MONSTER_VJOY_SMOOTH, 0.05) * 60 * dt)
+      a = math.clamp(a, 0.08, 0.85)
+      monsterVjoyDirSmoothed = monsterVjoyDirSmoothed:Lerp(raw, a)
+      if monsterVjoyDirSmoothed.Magnitude < MONSTER_VJOY_DEADZONE * 0.5 then
+         monsterVjoyDirSmoothed = Vector3.zero
+      end
+
+      local sent = monsterVjoyLastSent
+      local diff = (monsterVjoyDirSmoothed - sent).Magnitude
+      if diff >= MONSTER_VJOY_MOVE_EPS or (monsterVjoyDirSmoothed.Magnitude < 1e-4 and sent.Magnitude > 1e-4) then
+         local dir = monsterVjoyDirSmoothed
+         if dir.Magnitude > 1 then dir = dir.Unit end
          pcall(function()
             hum:Move(dir, false)
          end)
-         -- face target lightly (rotation only, no position write)
-         if horizDist > 0.5 then
-            local face = from + horiz
-            if (face - from).Magnitude > 0.08 then
-               local flatLook = Vector3.new(current.LookVector.X, 0, current.LookVector.Z)
-               local want = horiz.Unit
-               if flatLook.Magnitude > 0.05 then
-                  if flatLook.Unit:Dot(want) < 0.90 then
-                     if now - monsterLastMoveAt >= MONSTER_MOVE_COOLDOWN then
-                        ResourceManager:RecordWrite("MonsterWarp", "Position")
-                        myRoot.CFrame = CFrame.lookAt(from, Vector3.new(face.X, from.Y, face.Z))
-                        monsterLastMoveAt = now
-                     end
-                  end
-               end
-            end
-         end
-         return true, distance
+         monsterVjoyLastSent = monsterVjoyDirSmoothed
       end
 
-      return false, "no-humanoid"
+      if horizDist > 1.0 and now - monsterLastFaceAt >= MONSTER_VJOY_FACE_CD then
+         local want = horiz.Unit
+         local flatLook = Vector3.new(current.LookVector.X, 0, current.LookVector.Z)
+         if flatLook.Magnitude > 0.05 then
+            if flatLook.Unit:Dot(want) < MONSTER_VJOY_FACE_DOT then
+               local face = from + want
+               ResourceManager:RecordWrite("MonsterWarp", "Position")
+               myRoot.CFrame = CFrame.lookAt(from, Vector3.new(face.X, from.Y, face.Z))
+               monsterLastFaceAt = now
+               monsterLastMoveAt = now
+            end
+         end
+      end
+
+      return true, distance
     end
     function MonsterMove:SetState(state, message)
       if self.State ~= state or self.Message ~= message then
@@ -3889,7 +3939,9 @@ local okMonster, errMonster = pcall(function()
         monsterSavedWalkSpeed = nil
         monsterSpeedCharacter = nil
         monsterAppliedWalkSpeed = nil
-        monsterMoveMode = "GLIDE" 
+        monsterCachedHum = nil
+        monsterVjoyDirSmoothed = Vector3.zero
+        monsterVjoyLastSent = Vector3.zero 
         monsterCurrent = nil
         monsterLastRoot = nil
         monsterTrackedTarget = nil
