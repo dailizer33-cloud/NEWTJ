@@ -1,3 +1,3 @@
-Trigger revision: 2026-11-25T10:28:53+07:00
-Purpose: run the current Phase 19C focused startup-repair and targeted-UI-sync workflow after refreshing verification commands.
-Expected result: a later bot commit modifies main.lua and patches/phase19c_state_service.lua.
+Trigger revision: 2026-11-25T10:29:30+07:00
+Purpose: run Phase 19C focused startup-repair and targeted-UI-sync workflow now.
+Expected result: a later bot commit modifies main.lua and patches/phase19c_state_service.lua, then runs verify_phase19c.py and static-check.sh.
