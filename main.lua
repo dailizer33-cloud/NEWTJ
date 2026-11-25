@@ -4896,7 +4896,12 @@ if workspace.CurrentCamera then trackConnection(workspace.CurrentCamera:GetPrope
 local title = Instance.new("TextLabel", mainFrame)
 title.Name = "TayJayBrandTitle"; title.Size = UDim2.new(1, 0, 0, 54); title.Position = UDim2.new(0, 0, 0, 0); title.BackgroundTransparency = 1; title.Text = "TAYJAY"; title.TextColor3 = GREEN.ink; title.TextSize = 48; title.Font = Enum.Font.FredokaOne
 -- ขอบเข้มหนาขึ้น (เดิมขอบขาวบนสีพาสเทล ทำให้ตัวอักษรกลืนกัน) เพื่อให้โลโก้อ่านชัด
- title.TextStrokeTransparency = 1
+title.TextStrokeTransparency = 0.35
+title.TextStrokeColor3 = Color3.fromRGB(25, 35, 25)
+
+local titleGradient = Instance.new("UIGradient")
+titleGradient.Parent = title
+titleGradient.Color = ColorSequence.new({
     ColorSequenceKeypoint.new(0.00, Color3.fromRGB(255, 105, 180)),
     ColorSequenceKeypoint.new(0.18, Color3.fromRGB(255, 190, 225)),
     ColorSequenceKeypoint.new(0.36, Color3.fromRGB(160, 235, 255)),
