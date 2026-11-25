@@ -1,0 +1,34 @@
+name: Apply Warp Boss Event Only
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/apply-warp-boss-event.yml'
+      - 'tools/apply_warp_boss_event_skills.py'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply changes
+        run: |
+          set -euo pipefail
+          python3 tools/apply_warp_boss_event_skills.py
+          grep -q WARP_BOSS_EVENT_ONLY main.lua
+          grep -q allowWarp main.lua
+          grep -q 'monsterNoclipStep disabled' main.lua
+          grep -q 'nextBite = now + 0.05' main.lua
+      - name: Commit
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add main.lua
+          if git diff --cached --quiet; then echo no change; exit 0; fi
+          git commit -m "feat: warp only event/boss, remove monster noclip, skills on ready"
+          git push origin HEAD:main
