@@ -3208,7 +3208,7 @@ local okMonster, errMonster = pcall(function()
     --   WalkSpeed fixed 80 + Humanoid:Move (no hybrid walk/glide blend)
     --   Soft hop only when very far or dodging (anti-kick hop clamp)
     --   Loot: warp-collect orb / acorn / buff / event (separate path)
-    local MONSTER_WALK_SPEED = 80          -- fixed
+    local MONSTER_WALK_SPEED = 60          -- fixed
     local MONSTER_WARP_MAX_HOP = 36         -- max single hop (keep under ~40)
     local MONSTER_MOVE_COOLDOWN = 0.03
     local MONSTER_FAR_HOP = 55             -- use hop when farther than this
