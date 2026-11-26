@@ -1,0 +1,30 @@
+name: Run Farm Loot Cache Patch
+
+on:
+  push:
+    branches:
+      - fix/monster-warp-risk-gates
+    paths:
+      - fix_loot_cache.py
+      - .github/workflows/run-fix-loot-cache.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Run patch script
+        run: python3 fix_loot_cache.py
+      - name: Upload patched files for review
+        uses: actions/upload-artifact@v4
+        with:
+          name: farm-loot-cache-patch
+          path: |
+            main.lua
+            main.lua.bak
+          if-no-files-found: error
