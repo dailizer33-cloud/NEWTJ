@@ -4234,7 +4234,84 @@ local okMonster, errMonster = pcall(function()
         end
         return false
     end
-    -- Warp-collect: hop ONLY to event/boss-related loot then touch
+    -- FARM LOOT CACHE: bounded candidate cache with a 2s incremental rescan.
+    do
+        local FarmLoot = TJ.Main.FarmLoot
+        if type(FarmLoot) ~= "table" then FarmLoot = {}; TJ.Main.FarmLoot = FarmLoot end
+        local RESCAN_INTERVAL, MAX_CANDIDATES, BATCH = 2.0, 150, 400
+        local set, list = {}, {}
+        local nextScan, scanning, dirty = 0, false, true
+        local function matches(obj)
+            if not obj:IsA("BasePart") then return false end
+            local parent = obj.Parent
+            return parent ~= nil and farmIsLootName(obj.Name .. " " .. parent.Name)
+        end
+        local function add(obj)
+            if set[obj] or #list >= MAX_CANDIDATES or not matches(obj) then return end
+            set[obj] = true
+            list[#list + 1] = obj
+        end
+        local function remove(obj)
+            if not set[obj] then return end
+            set[obj] = nil
+            local idx = table.find(list, obj)
+            if idx then table.remove(list, idx) end
+        end
+        local function reset()
+            table.clear(set); table.clear(list)
+            nextScan, dirty = 0, true
+        end
+        local function rescan()
+            if scanning then return end
+            scanning = true
+            nextScan = os.clock() + RESCAN_INTERVAL
+            task.spawn(function()
+                local newSet, newList, processed = {}, {}, 0
+                local ok = pcall(function()
+                    for _, obj in ipairs(workspace:GetDescendants()) do
+                        if _G.TAYJAY_STOPPED or not states.MonsterWarp then break end
+                        if matches(obj) and #newList < MAX_CANDIDATES then
+                            newSet[obj] = true
+                            newList[#newList + 1] = obj
+                        end
+                        processed += 1
+                        if processed % BATCH == 0 then task.wait() end
+                    end
+                end)
+                if ok and states.MonsterWarp and not _G.TAYJAY_STOPPED then
+                    set, list = newSet, newList
+                end
+                scanning = false
+            end)
+        end
+        function FarmLoot.Nearest(root, character, maxDist)
+            local now = os.clock()
+            if not scanning and (dirty or now >= nextScan) then
+                dirty = false
+                rescan()
+            end
+            local best, bestDist = nil, maxDist or 14
+            for i = #list, 1, -1 do
+                local obj = list[i]
+                local parent = obj.Parent
+                if not parent or not obj:IsDescendantOf(workspace) then
+                    remove(obj)
+                elseif parent ~= character then
+                    local d = (obj.Position - root.Position).Magnitude
+                    if d > 0.5 and d < bestDist then best, bestDist = obj, d end
+                end
+            end
+            return best, bestDist
+        end
+        FarmLoot.Reset = reset
+        FarmLoot.MarkDirty = function() dirty = true end
+        trackConnection(workspace.DescendantAdded:Connect(function(obj)
+            if states.MonsterWarp then add(obj) end
+        end))
+        trackConnection(workspace.DescendantRemoving:Connect(function(obj) remove(obj) end))
+    end
+
+    -- Warp-collect: cache lookup only; touch/collect, never move the character.
     local function farmWarpCollectLoot()
         local character = LocalPlayer.Character
         if not character then return end
@@ -4242,22 +4319,11 @@ local okMonster, errMonster = pcall(function()
         if not root then return end
         local now = os.clock()
         if farmOrbTouchAt > 0 and now - farmOrbTouchAt < 0.28 then return end
-        -- Loot may be collected only when already within touch range.
-        -- Never move the character here: MONSTER movement has one CFrame writer.
-        local best, bestDist = nil, 14
-        for _, obj in ipairs(workspace:GetDescendants()) do
-            if obj:IsA("BasePart") and obj.Parent and obj.Parent ~= character then
-                local label = obj.Name .. " " .. (obj.Parent and obj.Parent.Name or "")
-                if farmIsLootName(label) then
-                    local d = (obj.Position - root.Position).Magnitude
-                    if d < bestDist and d > 0.5 then
-                        best, bestDist = obj, d
-                    end
-                end
-            end
-        end
+        local FarmLoot = TJ.Main.FarmLoot
+        if type(FarmLoot) ~= "table" then return end
+        local best = FarmLoot.Nearest(root, character, 14)
         if not best then return end
-        -- Touch/collect only; movement is exclusively owned by monsterGlueStep.
+        -- Movement is exclusively owned by monsterGlueStep.
         if (best.Position - root.Position).Magnitude <= 14 then
             pcall(function()
                 if firetouchinterest then
@@ -4293,6 +4359,9 @@ local okMonster, errMonster = pcall(function()
                 -- Keep autonomous Move remote firing disabled. FireMove remains
                 -- exposed for explicit callers; Bite keeps its existing cadence.
                 farmWarpCollectLoot()
+            else
+                local FL = TJ.Main.FarmLoot
+                if type(FL) == "table" then FL.Reset() end
             end
             task.wait(0.05)
         end
