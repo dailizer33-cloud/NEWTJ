@@ -1,0 +1,28 @@
+--- a/main.lua
++++ b/main.lua
+@@ -3901,16 +3901,15 @@
+          monsterVjoyDirSmoothed = Vector3.zero
+       end
+ 
+-      local sent = monsterVjoyLastSent
+-      local diff = (monsterVjoyDirSmoothed - sent).Magnitude
+-      if diff >= MONSTER_VJOY_MOVE_EPS or (monsterVjoyDirSmoothed.Magnitude < 1e-4 and sent.Magnitude > 1e-4) then
+-         local dir = monsterVjoyDirSmoothed
+-         if dir.Magnitude > 1 then dir = dir.Unit end
+-         pcall(function()
+-            hum:Move(dir, false)
+-         end)
+-         monsterVjoyLastSent = monsterVjoyDirSmoothed
+-      end
++      -- FIX: ส่ง Humanoid:Move ทุกเฟรม (เดิมส่งเฉพาะตอนทิศทางเปลี่ยน)
++      -- ตัวควบคุมอินพุตของเกม (PlayerModule) เขียนทับ MoveDirection ทุกเฟรม
++      -- ทำให้ตัวละครหยุดนิ่งในท่าเดิม เพราะไม่มีการส่งทิศทางซ้ำ
++      local dir = monsterVjoyDirSmoothed
++      if dir.Magnitude > 1 then dir = dir.Unit end
++      pcall(function()
++         hum:Move(dir, false)
++      end)
++      monsterVjoyLastSent = monsterVjoyDirSmoothed
+ 
+       -- Smooth facing with gradual rotation (no snapping)
+       if horizDist > 1.0 and now - monsterLastFaceAt >= MONSTER_VJOY_FACE_CD then
