@@ -1,106 +1,287 @@
 --- a/main.lua
 +++ b/main.lua
-@@ -815,6 +815,29 @@
-     self.LastStopReason = tostring(reason or "RESET")
-     return true
- end
-+-- =========================================================
-+-- SINGLE WALK COMMAND
-+-- ทุกระบบ (Monster / Player WARP) ต้องสั่งเดินผ่านคำสั่งนี้เท่านั้น
-+--   _tjMovementController:Walk(owner, humanoid, direction)
-+--   _tjMovementController:StopWalk(humanoid)
-+-- - ส่ง Humanoid:Move ทุกครั้งที่ถูกเรียก (เรียกทุกเฟรมจาก loop ของเจ้าของ)
-+-- - ถ้า owner ไม่ตรงกับเจ้าของสิทธิ์ปัจจุบัน จะไม่สั่งเดิน (กันสองระบบแย่งกัน)
-+-- - owner = nil ใช้เฉพาะตอนหยุดเดิน (Vector3.zero) เสมอได้
-+-- =========================================================
-+function _tjMovementController:Walk(owner, hum, direction)
-+    if not hum or not hum.Parent then return false end
-+    if owner ~= nil and not self:IsOwner(owner) then return false end
-+    local dir = direction or Vector3.zero
-+    if dir.Magnitude > 1 then dir = dir.Unit end
-+    local ok = pcall(function() hum:Move(dir, false) end)
-+    self.LastWalkOwner = owner
-+    self.LastWalkDir = dir
-+    self.LastWalkAt = os.clock()
-+    return ok
-+end
-+function _tjMovementController:StopWalk(hum)
-+    return self:Walk(nil, hum, Vector3.zero)
-+end
- end -- [/TAYJAY MOVEMENT CONTROLLER LOCAL-LIMIT SCOPE]
- -- =========================================================
- -- TAYJAY TARGET SERVICE V2
-@@ -2540,9 +2563,7 @@
-                 myRootNow.CFrame = CFrame.lookAt(dest, tRoot.Position)
-                 
-                 -- Move humanoid in the direction
--                pcall(function()
--                    myHum:Move(horizDelta.Unit, false)
--                end)
-+                _tjMovementController:Walk("PLAYER_WARP", myHum, horizDelta.Unit)
-             else
-                 -- Close: use virtual joystick only (no teleport)
-                 ResourceManager:RecordWrite("ShadowHunter", "Velocity")
-@@ -2576,13 +2597,9 @@
-                 
-                 -- Move toward target with virtual joystick
-                 if distance > 0.5 then
--                    pcall(function()
--                        myHum:Move(horizDelta.Unit, false)
--                    end)
-+                    _tjMovementController:Walk("PLAYER_WARP", myHum, horizDelta.Unit)
-                 else
--                    pcall(function()
--                        myHum:Move(Vector3.zero, false)
--                    end)
-+                    _tjMovementController:Walk("PLAYER_WARP", myHum, Vector3.zero)
+@@ -4212,77 +4212,222 @@
+ 
+ 
+     local farmOrbTouchAt = 0
+-    -- WARP_BOSS_EVENT_ONLY: warp-collect only event/boss-related pickups
+-    local FARM_LOOT_KEYWORDS = {
+-        "event", "boss", "queen", "raid", "worldboss", "world boss",
+-        "limited", "special event", "boss drop", "boss orb",
+-    }
+-    local function farmIsLootName(name)
+-        local n = string.lower(tostring(name or ""))
+-        for _, key in ipairs(FARM_LOOT_KEYWORDS) do
+-            if string.find(n, key, 1, true) then return true end
++    -- LOOT RADAR (ported from Tayjay Farm RADAR idea): warp-collect event/boss pickups.
++    -- Evidence = keyword in the part's name chain (part + up to 4 parents), then ranked by
++    -- structural evidence (TouchTransmitter / ProximityPrompt / Id attribute).
++    -- Cached scan (every LOOT_RESCAN s) instead of Workspace:GetDescendants() every tick.
++    local farmWarpCollectLoot
++    do
++        local LOOT_KEYWORDS = {
++            "event", "boss", "queen", "raid", "worldboss", "world boss", "limited", "festival",
++            "treasure", "chest", "meteor", "boss drop", "boss orb",
++        }
++        local LOOT_EXCLUDE = {
++            "portal", "gate", "door", "button", "shop", "display", "statue", "preview", "showcase",
++            "decor", "prop", "sign", "banner", "poster", "hologram", "viewport", "icon", "arena",
++            "barrier", "wall", "floor", "platform", "terrain", "effect", "vfx", "beam", "trail",
++        }
++        local LOOT_ID_KEYS = { "Id", "OrbId", "ID", "OrbID" }
++        local LOOT_RADIUS = 150
++        local LOOT_RESCAN = 1.5
++        local LOOT_MAX_SIZE = 40
++        local LOOT_STUCK_SECONDS = 8
++        local LOOT_BLOCK_SECONDS = 30
++        local LOOT_PRINT_MAX = 30
++        local lootCache, lootCacheAt = {}, 0
++        local lootBlocked = setmetatable({}, { __mode = "k" })
++        local lootTried = setmetatable({}, { __mode = "k" })
++        local lootPrinted = setmetatable({}, { __mode = "k" })
++        local lootPrintCount = 0
++        local hitMemo, excludeMemo = {}, {}
++        local function nameHasKeyword(name)
++            local v = hitMemo[name]
++            if v == nil then
++                v = false
++                local lower = string.lower(name)
++                for _, kw in ipairs(LOOT_KEYWORDS) do
++                    if string.find(lower, kw, 1, true) then v = true break end
++                end
++                hitMemo[name] = v
++            end
++            return v
+         end
+-        return false
+-    end
+-    -- Warp-collect: hop ONLY to event/boss-related loot then touch
+-    local function farmWarpCollectLoot()
+-        local character = LocalPlayer.Character
+-        if not character then return end
+-        local root = character:FindFirstChild("HumanoidRootPart") or character.PrimaryPart
+-        if not root then return end
+-        local now = os.clock()
+-        if farmOrbTouchAt > 0 and now - farmOrbTouchAt < 0.28 then return end
+-        local best, bestDist = nil, 90
+-        for _, obj in ipairs(workspace:GetDescendants()) do
+-            if obj:IsA("BasePart") and obj.Parent and obj.Parent ~= character then
+-                local label = obj.Name .. " " .. (obj.Parent and obj.Parent.Name or "")
+-                if farmIsLootName(label) then
+-                    local d = (obj.Position - root.Position).Magnitude
+-                    if d < bestDist and d > 0.5 then
+-                        best, bestDist = obj, d
++        local function nameIsExcluded(name)
++            local v = excludeMemo[name]
++            if v == nil then
++                v = false
++                local lower = string.lower(name)
++                for _, kw in ipairs(LOOT_EXCLUDE) do
++                    if string.find(lower, kw, 1, true) then v = true break end
++                end
++                excludeMemo[name] = v
++            end
++            return v
++        end
++        local function chainText(obj)
++            local parts, cur, depth = {}, obj, 0
++            while cur and cur ~= workspace and depth < 5 do
++                parts[#parts + 1] = cur.Name
++                cur = cur.Parent
++                depth = depth + 1
++            end
++            return table.concat(parts, "/")
++        end
++        -- keyword in part name or in up to 4 parents
++        local function chainHasKeyword(obj)
++            local cur, depth = obj, 0
++            while cur and cur ~= workspace and depth < 5 do
++                if nameHasKeyword(cur.Name) then return true end
++                cur = cur.Parent
++                depth = depth + 1
++            end
++            return false
++        end
++        -- parts of a boss/monster body (Humanoid or HP attribute) are NOT loot
++        local function isCreaturePart(obj)
++            local cur, depth = obj.Parent, 0
++            while cur and cur ~= workspace and depth < 4 do
++                if cur:IsA("Model") then
++                    if cur:FindFirstChildOfClass("Humanoid") then return true end
++                    local ok, hp = pcall(function()
++                        return cur:GetAttribute("Health") or cur:GetAttribute("HP")
++                    end)
++                    if ok and hp ~= nil then return true end
++                end
++                cur = cur.Parent
++                depth = depth + 1
++            end
++            return false
++        end
++        local function hasInteract(obj)
++            if obj:FindFirstChildWhichIsA("TouchTransmitter") or obj:FindFirstChildWhichIsA("ProximityPrompt") then
++                return true
++            end
++            local p = obj.Parent
++            if p and p ~= workspace and p:FindFirstChildWhichIsA("ProximityPrompt") then return true end
++            for _, key in ipairs(LOOT_ID_KEYS) do
++                if type(obj:GetAttribute(key)) == "number" then return true end
++            end
++            return false
++        end
++        local function scanLoot(character)
++            local list = {}
++            local all = workspace:GetDescendants()
++            for i = 1, #all do
++                local obj = all[i]
++                if obj:IsA("BasePart") and not obj:IsA("Terrain") and not obj:IsA("SpawnLocation")
++                    and obj.Size.Magnitude <= LOOT_MAX_SIZE
++                    and not obj:IsDescendantOf(character)
++                    and chainHasKeyword(obj) then
++                    local parentName = obj.Parent and obj.Parent.Name or ""
++                    if not nameIsExcluded(obj.Name) and not nameIsExcluded(parentName)
++                        and not isCreaturePart(obj) then
++                        local interact = hasInteract(obj)
++                        -- invisible parts with no way to be collected = zones/triggers, skip
++                        if interact or obj.Transparency < 0.95 then
++                            list[#list + 1] = { part = obj, interact = interact }
++                        end
+                     end
                  end
++                if i % 1500 == 0 then task.wait() end
              end
-         end)
-@@ -3839,7 +3856,7 @@
-             myRoot.CFrame = CFrame.new(dest) * (current - current.Position)
-             monsterLastMoveAt = now
-          end
--         if hum then pcall(function() hum:Move(Vector3.zero, false) end) end
-+         if hum then _tjMovementController:Walk("MONSTER", hum, Vector3.zero) end
-          return true, distance
-       end
- 
-@@ -3866,7 +3883,7 @@
-          ResourceManager:RecordWrite("MonsterWarp", "Position")
-          myRoot.CFrame = CFrame.lookAt(dest, Vector3.new(face.X, dest.Y, face.Z))
-          monsterLastMoveAt = now
--         if hum then pcall(function() hum:Move(Vector3.zero, false) end) end
-+         if hum then _tjMovementController:Walk("MONSTER", hum, Vector3.zero) end
-          return true, distance
-       end
- 
-@@ -3901,16 +3918,9 @@
-          monsterVjoyDirSmoothed = Vector3.zero
-       end
- 
--      local sent = monsterVjoyLastSent
--      local diff = (monsterVjoyDirSmoothed - sent).Magnitude
--      if diff >= MONSTER_VJOY_MOVE_EPS or (monsterVjoyDirSmoothed.Magnitude < 1e-4 and sent.Magnitude > 1e-4) then
--         local dir = monsterVjoyDirSmoothed
--         if dir.Magnitude > 1 then dir = dir.Unit end
--         pcall(function()
--            hum:Move(dir, false)
--         end)
--         monsterVjoyLastSent = monsterVjoyDirSmoothed
--      end
-+      -- คำสั่งเดินเดียว: ส่งทุกเฟรม (เดิมส่งเฉพาะตอนทิศทางเปลี่ยน ทำให้ตัวละครยืนนิ่ง)
-+      _tjMovementController:Walk("MONSTER", hum, monsterVjoyDirSmoothed)
-+      monsterVjoyLastSent = monsterVjoyDirSmoothed
- 
-       -- Smooth facing with gradual rotation (no snapping)
-       if horizDist > 1.0 and now - monsterLastFaceAt >= MONSTER_VJOY_FACE_CD then
-@@ -4054,7 +4064,7 @@
-         local speedCharacter = monsterSpeedCharacter
-         local speedHumanoid = speedCharacter and speedCharacter:FindFirstChildOfClass("Humanoid")
-         if speedHumanoid then
--            pcall(function() speedHumanoid:Move(Vector3.zero, false) end)
-+            _tjMovementController:StopWalk(speedHumanoid)
-             if monsterSavedWalkSpeed ~= nil then
-                 pcall(function() speedHumanoid.WalkSpeed = monsterSavedWalkSpeed end)
++            return list
+         end
+-        if not best then return end
+-        -- soft hop toward loot (anti-kick clamp)
+-        local from = root.Position
+-        local delta = best.Position - from
+-        local hop = math.min(delta.Magnitude, MONSTER_WARP_MAX_HOP)
+-        if hop > 1.2 and delta.Magnitude > 1e-4 then
+-            local dest = from + delta.Unit * hop
+-            if MONSTER_GROUND_STICK then
+-                local gy = monsterGroundY(dest, { character })
+-                if math.abs(gy - dest.Y) < 18 then
+-                    dest = Vector3.new(dest.X, gy, dest.Z)
+-                end
+-            end
+-            pcall(function()
+-                ResourceManager:RecordWrite("MonsterWarp", "Position")
+-                root.AssemblyLinearVelocity = Vector3.zero
+-                root.CFrame = CFrame.new(dest, dest + Vector3.new(delta.X, 0, delta.Z))
+-            end)
+-            monsterLastMoveAt = now
+-        end
+-        -- touch / firetouch when close enough
+-        if (best.Position - root.Position).Magnitude <= 14 then
+-            pcall(function()
+-                if firetouchinterest then
+-                    firetouchinterest(root, best, 0)
+-                    firetouchinterest(root, best, 1)
+-                end
+-            end)
+-            local oid = best:GetAttribute("Id") or best:GetAttribute("OrbId")
+-                or (best.Parent and (best.Parent:GetAttribute("Id") or best.Parent:GetAttribute("OrbId")))
+-            if type(oid) == "number" then
++        farmWarpCollectLoot = function()
++            local character = LocalPlayer.Character
++            if not character then return end
++            local root = character:FindFirstChild("HumanoidRootPart") or character.PrimaryPart
++            if not root then return end
++            local now = os.clock()
++            if farmOrbTouchAt > 0 and now - farmOrbTouchAt < 0.28 then return end
++            if now - lootCacheAt >= LOOT_RESCAN then
++                lootCacheAt = now -- set first so a yielding scan is never re-entered
++                lootCache = scanLoot(character)
++                now = os.clock()
++                root = character:FindFirstChild("HumanoidRootPart") or character.PrimaryPart
++                if not root then return end
++            end
++            local best, bestScore, bestDist = nil, math.huge, 0
++            local rootPos = root.Position
++            for _, cand in ipairs(lootCache) do
++                local obj = cand.part
++                local blockedUntil = lootBlocked[obj]
++                if obj.Parent and not (blockedUntil and now < blockedUntil) then
++                    local d = (obj.Position - rootPos).Magnitude
++                    if d < LOOT_RADIUS then
++                        local score = d - (cand.interact and 25 or 0)
++                        if score < bestScore then
++                            best, bestScore, bestDist = obj, score, d
++                        end
++                    end
++                end
++            end
++            if not best then return end
++            -- give up on pickups that never disappear (unreachable / decorative)
++            local tried = lootTried[best]
++            if not tried then
++                lootTried[best] = { since = now }
++            elseif now - tried.since > LOOT_STUCK_SECONDS then
++                lootBlocked[best] = now + LOOT_BLOCK_SECONDS
++                lootTried[best] = nil
++                return
++            end
++            if not lootPrinted[best] and lootPrintCount < LOOT_PRINT_MAX then
++                lootPrinted[best] = true
++                lootPrintCount = lootPrintCount + 1
++                print(string.format("[TAYJAY LOOT] %s d=%.0f", chainText(best), bestDist))
++            end
++            -- soft hop toward loot (anti-kick clamp)
++            local from = root.Position
++            local delta = best.Position - from
++            local hop = math.min(delta.Magnitude, MONSTER_WARP_MAX_HOP)
++            if hop > 1.2 and delta.Magnitude > 1e-4 then
++                local dest = from + delta.Unit * hop
++                if MONSTER_GROUND_STICK then
++                    local gy = monsterGroundY(dest, { character })
++                    if math.abs(gy - dest.Y) < 18 then
++                        dest = Vector3.new(dest.X, gy, dest.Z)
++                    end
++                end
++                pcall(function()
++                    ResourceManager:RecordWrite("MonsterWarp", "Position")
++                    root.AssemblyLinearVelocity = Vector3.zero
++                    root.CFrame = CFrame.new(dest, dest + Vector3.new(delta.X, 0, delta.Z))
++                end)
++                monsterLastMoveAt = now
++            end
++            -- touch / prompt / Collect remote when close enough
++            if (best.Position - root.Position).Magnitude <= 14 then
++                pcall(function()
++                    if firetouchinterest then
++                        firetouchinterest(root, best, 0)
++                        firetouchinterest(root, best, 1)
++                    end
++                end)
+                 pcall(function()
+-                    local folder = ReplicatedStorage:FindFirstChild("AntRemotes")
+-                    local col = folder and folder:FindFirstChild("Collect")
+-                    if col then col:FireServer({ oid }) end
++                    if fireproximityprompt then
++                        local prompt = best:FindFirstChildWhichIsA("ProximityPrompt")
++                            or (best.Parent and best.Parent:FindFirstChildWhichIsA("ProximityPrompt"))
++                        if prompt then fireproximityprompt(prompt) end
++                    end
+                 end)
++                local oid
++                for _, key in ipairs(LOOT_ID_KEYS) do
++                    oid = best:GetAttribute(key)
++                        or (best.Parent and best.Parent:GetAttribute(key))
++                    if type(oid) == "number" then break end
++                    oid = nil
++                end
++                if oid then
++                    pcall(function()
++                        local folder = ReplicatedStorage:FindFirstChild("AntRemotes")
++                        local col = folder and folder:FindFirstChild("Collect")
++                        if col then col:FireServer({ oid }) end
++                    end)
++                end
              end
++            farmOrbTouchAt = now
+         end
+-        farmOrbTouchAt = now
+     end
+     task.spawn(function()
+         -- Fire skills whenever ready (cooldowns enforced inside skillFire*)
