@@ -3990,6 +3990,16 @@ local okMonster, errMonster = pcall(function()
       self:SetState("OFF", "stop")
       monsterLastMoveAt = 0
     end
+    -- Dodge uses the same MONSTER movement owner and the same frame writer.
+    -- It computes a destination only; it never writes CFrame independently.
+    local function monsterDodgeWarpBehind(targetRoot)
+      if not targetRoot or not targetRoot.Parent then return nil end
+      local backOffset = math.max(3, (targetRoot.Size.Z * 0.5) + 2)
+      local position = targetRoot.Position
+        - targetRoot.CFrame.LookVector * backOffset
+        + Vector3.new(0, MONSTER_DODGE_HEIGHT, 0)
+      return CFrame.lookAt(position, targetRoot.Position)
+    end
     -- วางตัวละครบนเป้าหมายแบบ soft-move (anti-kick)
     local function monsterGlueStep(dt)
       if not states.MonsterWarp then return end
@@ -4036,7 +4046,7 @@ local okMonster, errMonster = pcall(function()
          moveState = "ORBIT"
       end
       if dodging then
-         destination = CFrame.new(targetRoot.Position + Vector3.new(0, MONSTER_DODGE_HEIGHT, 0))
+         destination = monsterDodgeWarpBehind(targetRoot) or destination
          moveState = "DODGING"
       end
       MonsterMove:SetState(moveState, target.name or moveState)
@@ -4232,7 +4242,9 @@ local okMonster, errMonster = pcall(function()
         if not root then return end
         local now = os.clock()
         if farmOrbTouchAt > 0 and now - farmOrbTouchAt < 0.28 then return end
-        local best, bestDist = nil, 90
+        -- Loot may be collected only when already within touch range.
+        -- Never move the character here: MONSTER movement has one CFrame writer.
+        local best, bestDist = nil, 14
         for _, obj in ipairs(workspace:GetDescendants()) do
             if obj:IsA("BasePart") and obj.Parent and obj.Parent ~= character then
                 local label = obj.Name .. " " .. (obj.Parent and obj.Parent.Name or "")
@@ -4245,26 +4257,7 @@ local okMonster, errMonster = pcall(function()
             end
         end
         if not best then return end
-        -- soft hop toward loot (anti-kick clamp)
-        local from = root.Position
-        local delta = best.Position - from
-        local hop = math.min(delta.Magnitude, MONSTER_WARP_MAX_HOP)
-        if hop > 1.2 and delta.Magnitude > 1e-4 then
-            local dest = from + delta.Unit * hop
-            if MONSTER_GROUND_STICK then
-                local gy = monsterGroundY(dest, { character })
-                if math.abs(gy - dest.Y) < 18 then
-                    dest = Vector3.new(dest.X, gy, dest.Z)
-                end
-            end
-            pcall(function()
-                ResourceManager:RecordWrite("MonsterWarp", "Position")
-                root.AssemblyLinearVelocity = Vector3.zero
-                root.CFrame = CFrame.new(dest, dest + Vector3.new(delta.X, 0, delta.Z))
-            end)
-            monsterLastMoveAt = now
-        end
-        -- touch / firetouch when close enough
+        -- Touch/collect only; movement is exclusively owned by monsterGlueStep.
         if (best.Position - root.Position).Magnitude <= 14 then
             pcall(function()
                 if firetouchinterest then
@@ -4286,7 +4279,7 @@ local okMonster, errMonster = pcall(function()
     end
     task.spawn(function()
         -- Fire skills whenever ready (cooldowns enforced inside skillFire*)
-        local nextBite, nextMove = 0, 0
+        local nextBite = 0
         while screenGui.Parent and not _G.TAYJAY_STOPPED do
             if states.MonsterWarp and monsterFilterMode == "Monster" then
                 local now = os.clock()
@@ -4297,13 +4290,8 @@ local okMonster, errMonster = pcall(function()
                         nextBite = now + 0.05  -- retry soon until ready
                     end
                 end
-                if now >= nextMove then
-                    if skillFireMoveAtTarget() then
-                        nextMove = now + 10.5
-                    else
-                        nextMove = now + 0.15  -- poll until Move skill ready
-                    end
-                end
+                -- Keep autonomous Move remote firing disabled. FireMove remains
+                -- exposed for explicit callers; Bite keeps its existing cadence.
                 farmWarpCollectLoot()
             end
             task.wait(0.05)
@@ -4711,12 +4699,9 @@ trackConnection(orbitBtn.Activated:Connect(function()
             if monsterResumeGeneration == myGeneration then monsterResumeLatched = false end
         end)
     end))
+    -- One authoritative per-frame movement writer. Do not also bind PreRender.
     trackConnection(RunService.Heartbeat:Connect(monsterGlueStep))
     -- trackConnection(RunService.Stepped:Connect(monsterNoclipStep)) -- removed: no monster noclip
-    do
-        local okPre, preRender = pcall(function() return RunService.PreRender end)
-        if okPre and preRender then trackConnection(preRender:Connect(monsterGlueStep)) end
-    end
     -- Throttled scan/follow loop: no per-frame Workspace:GetDescendants() calls.
     task.spawn(function()
         local followAccumulator = 0
