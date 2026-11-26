@@ -815,6 +815,29 @@ function _tjMovementController:ForceClear(reason)
     self.LastStopReason = tostring(reason or "RESET")
     return true
 end
+-- =========================================================
+-- SINGLE WALK COMMAND
+-- ทุกระบบ (Monster / Player WARP) ต้องสั่งเดินผ่านคำสั่งนี้เท่านั้น
+--   _tjMovementController:Walk(owner, humanoid, direction)
+--   _tjMovementController:StopWalk(humanoid)
+-- - ส่ง Humanoid:Move ทุกครั้งที่ถูกเรียก (เรียกทุกเฟรมจาก loop ของเจ้าของ)
+-- - ถ้า owner ไม่ตรงกับเจ้าของสิทธิ์ปัจจุบัน จะไม่สั่งเดิน (กันสองระบบแย่งกัน)
+-- - owner = nil ใช้เฉพาะตอนหยุดเดิน (Vector3.zero) เสมอได้
+-- =========================================================
+function _tjMovementController:Walk(owner, hum, direction)
+    if not hum or not hum.Parent then return false end
+    if owner ~= nil and not self:IsOwner(owner) then return false end
+    local dir = direction or Vector3.zero
+    if dir.Magnitude > 1 then dir = dir.Unit end
+    local ok = pcall(function() hum:Move(dir, false) end)
+    self.LastWalkOwner = owner
+    self.LastWalkDir = dir
+    self.LastWalkAt = os.clock()
+    return ok
+end
+function _tjMovementController:StopWalk(hum)
+    return self:Walk(nil, hum, Vector3.zero)
+end
 end -- [/TAYJAY MOVEMENT CONTROLLER LOCAL-LIMIT SCOPE]
 -- =========================================================
 -- TAYJAY TARGET SERVICE V2
@@ -2540,9 +2563,7 @@ local function startWarpPhysicsConnections()
                 myRootNow.CFrame = CFrame.lookAt(dest, tRoot.Position)
                 
                 -- Move humanoid in the direction
-                pcall(function()
-                    myHum:Move(horizDelta.Unit, false)
-                end)
+                _tjMovementController:Walk("PLAYER_WARP", myHum, horizDelta.Unit)
             else
                 -- Close: use virtual joystick only (no teleport)
                 ResourceManager:RecordWrite("ShadowHunter", "Velocity")
@@ -2576,13 +2597,9 @@ local function startWarpPhysicsConnections()
                 
                 -- Move toward target with virtual joystick
                 if distance > 0.5 then
-                    pcall(function()
-                        myHum:Move(horizDelta.Unit, false)
-                    end)
+                    _tjMovementController:Walk("PLAYER_WARP", myHum, horizDelta.Unit)
                 else
-                    pcall(function()
-                        myHum:Move(Vector3.zero, false)
-                    end)
+                    _tjMovementController:Walk("PLAYER_WARP", myHum, Vector3.zero)
                 end
             end
         end)
@@ -3839,7 +3856,7 @@ local okMonster, errMonster = pcall(function()
             myRoot.CFrame = CFrame.new(dest) * (current - current.Position)
             monsterLastMoveAt = now
          end
-         if hum then pcall(function() hum:Move(Vector3.zero, false) end) end
+         if hum then _tjMovementController:Walk("MONSTER", hum, Vector3.zero) end
          return true, distance
       end
 
@@ -3866,7 +3883,7 @@ local okMonster, errMonster = pcall(function()
          ResourceManager:RecordWrite("MonsterWarp", "Position")
          myRoot.CFrame = CFrame.lookAt(dest, Vector3.new(face.X, dest.Y, face.Z))
          monsterLastMoveAt = now
-         if hum then pcall(function() hum:Move(Vector3.zero, false) end) end
+         if hum then _tjMovementController:Walk("MONSTER", hum, Vector3.zero) end
          return true, distance
       end
 
@@ -3901,16 +3918,9 @@ local okMonster, errMonster = pcall(function()
          monsterVjoyDirSmoothed = Vector3.zero
       end
 
-      local sent = monsterVjoyLastSent
-      local diff = (monsterVjoyDirSmoothed - sent).Magnitude
-      if diff >= MONSTER_VJOY_MOVE_EPS or (monsterVjoyDirSmoothed.Magnitude < 1e-4 and sent.Magnitude > 1e-4) then
-         local dir = monsterVjoyDirSmoothed
-         if dir.Magnitude > 1 then dir = dir.Unit end
-         pcall(function()
-            hum:Move(dir, false)
-         end)
-         monsterVjoyLastSent = monsterVjoyDirSmoothed
-      end
+      -- คำสั่งเดินเดียว: ส่งทุกเฟรม (เดิมส่งเฉพาะตอนทิศทางเปลี่ยน ทำให้ตัวละครยืนนิ่ง)
+      _tjMovementController:Walk("MONSTER", hum, monsterVjoyDirSmoothed)
+      monsterVjoyLastSent = monsterVjoyDirSmoothed
 
       -- Smooth facing with gradual rotation (no snapping)
       if horizDist > 1.0 and now - monsterLastFaceAt >= MONSTER_VJOY_FACE_CD then
@@ -4054,7 +4064,7 @@ local okMonster, errMonster = pcall(function()
         local speedCharacter = monsterSpeedCharacter
         local speedHumanoid = speedCharacter and speedCharacter:FindFirstChildOfClass("Humanoid")
         if speedHumanoid then
-            pcall(function() speedHumanoid:Move(Vector3.zero, false) end)
+            _tjMovementController:StopWalk(speedHumanoid)
             if monsterSavedWalkSpeed ~= nil then
                 pcall(function() speedHumanoid.WalkSpeed = monsterSavedWalkSpeed end)
             end
