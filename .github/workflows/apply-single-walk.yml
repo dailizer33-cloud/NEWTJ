@@ -1,0 +1,20 @@
+name: Apply Single Walk Command
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          set -euo pipefail
+          git apply --check patches/single_walk_command.diff
+          git apply patches/single_walk_command.diff
+          test "$(grep -c ':Move(' main.lua)" = "1"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add main.lua
+          git commit -m "refactor(movement): single Walk command"
+          git push origin HEAD:main
