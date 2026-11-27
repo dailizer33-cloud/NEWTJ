@@ -1,4 +1,4 @@
-# TAYJAY SOFTMOVE
+# NEWTJ
 
 สคริปต์ Lua แบบ client (สไตล์ executor) ไฟล์เดียว: เมนู UI, Player ESP, MM2 Role ESP,
 Death Note / Monster Warp, Rapid Bite, FPS Booster, Server Hop ฯลฯ
@@ -30,8 +30,6 @@ loadstring(game:HttpGet("https://raw.githubusercontent.com/dailizer33-cloud/NEWT
 ```
 
 หมายเหตุ: ใช้ลักษณะนี้หมายความว่าใครมีสิทธิ์เขียน repo ก็คุมโค้ดที่คุณรัน — เปิด 2FA และจำกัดสิทธิ์ push
-
-การใช้สคริปต์ในเกมที่ไม่ใช่ของคุณอาจขัดกับข้อตกลงของ Roblox และเสี่ยงโดนลงโทษบัญชี
 
 ## ตรวจโค้ดก่อน commit
 
