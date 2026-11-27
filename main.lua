@@ -1878,13 +1878,13 @@ pcall(function()
         end
     end
 end)
-local ATTACK_COOLDOWN = 0.25
+local atk_cd = 0.25
 local lastAttackAt = 0
 local attackCallBusy = false
 local function tryAttackTarget(targetCharacter)
     if not AttackRemote or not targetCharacter or attackCallBusy then return false end
     local now = os.clock()
-    if now - lastAttackAt < ATTACK_COOLDOWN then return false end
+    if now - lastAttackAt < atk_cd then return false end
     lastAttackAt = now
     attackCallBusy = true
     local ok = pcall(function()
@@ -4120,7 +4120,7 @@ local okMonster, errMonster = pcall(function()
     -- =========================================================
     -- SKILL HYBRID (from spy logs 2026-11-25) - remote fire, not GUI tap
     -- =========================================================
-    local SkillHybrid = { BiteCooldown = 0.62, MoveCooldown = 10.5, _lastBite = 0, _lastMove = 0, _remotes = nil }
+    local SkillHybrid = { BiteCooldown = 0.25, MoveCooldown = 10.5, _lastBite = 0, _lastMove = 0, _remotes = nil }
     local function skillGetRemotes()
         if SkillHybrid._remotes then return SkillHybrid._remotes end
         local folder = ReplicatedStorage:FindFirstChild("AntRemotes")
@@ -4881,7 +4881,7 @@ local okRB, errRB = pcall(function()
     local LogService = game:GetService("LogService")
     local VirtualInputManager = nil
     pcall(function() VirtualInputManager = game:GetService("VirtualInputManager") end)
-    local RAPID_CPS = 20
+    local RAPID_INTERVAL = 0.25
     local RAPID_METHOD = "auto"               -- "auto" | "touch" | "signal"
     local RAPID_TEXTS = { "bite" }
     local STUN_WORDS = { "stun", "daze", "dizzy", "vulnerab", "exhaust", "weaken", "มึน", "สตัน" }
@@ -5046,7 +5046,7 @@ local okRB, errRB = pcall(function()
         if rapidMode == 2 and not stunSeen then clickAccumulator = 0 end
         if rapidMode == 1 or stunSeen then
             clickAccumulator = clickAccumulator + dt
-            local interval = 1 / RAPID_CPS
+            local interval = RAPID_INTERVAL
             local clicks = 0
             while clickAccumulator >= interval and clicks < 3 do
                 clickAccumulator = clickAccumulator - interval
