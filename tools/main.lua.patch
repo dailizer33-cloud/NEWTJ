@@ -11,4 +11,289 @@
      }
      -- NPC = ตัวละครที่ไม่ใช่ศัตรู (ร้านค้า/เควสต์/ผู้ช่วย ฯลฯ) → แยกเป็นกลุ่ม NPC เสมอ
      local NPC_NAME_HINTS = {
-PLACEHOLDER_REST
+@@ -3613,8 +3615,23 @@
+         candidate.root = getMonsterRoot(model, humanoid, candidate.kind == "Monster")
+         return alive and candidate.root ~= nil
+     end
++    local function monsterIsBossCandidate(candidate)
++        if not candidate then return false end
++        if candidate.reason == "boss-hud" then return true end
++        local n = string.lower(tostring(candidate.name or ""))
++        return string.find(n, "mantis", 1, true) ~= nil
++            or string.find(n, "orchid", 1, true) ~= nil
++            or string.find(n, "anteater", 1, true) ~= nil
++            or string.find(n, "worldboss", 1, true) ~= nil
++            or string.find(n, "raid", 1, true) ~= nil
++            or (string.find(n, "giant", 1, true) ~= nil and string.find(n, "boss", 1, true) ~= nil)
++            or string.find(n, "boss", 1, true) ~= nil
++    end
++    -- Prefer world bosses within BOSS_PRIORITY_RANGE over nearer trash mobs.
++    local BOSS_PRIORITY_RANGE = 600
+     local function nearestMonster(origin, ignoreModel)
+         local best, bestDistance = nil, math.huge
++        local bestBoss, bestBossDistance = nil, math.huge
+         for _, candidate in ipairs(monsterCandidates) do
+             if candidate.model ~= ignoreModel and isMonsterAlive(candidate) then
+                 local distance = (candidate.root.Position - origin).Magnitude
+@@ -3622,7 +3639,14 @@
+                     best = candidate
+                     bestDistance = distance
+                 end
+-            end
++                if monsterIsBossCandidate(candidate) and distance <= BOSS_PRIORITY_RANGE and distance < bestBossDistance then
++                    bestBoss = candidate
++                    bestBossDistance = distance
++                end
++            end
++        end
++        if bestBoss then
++            return bestBoss
+         end
+         return best
+     end
+@@ -4212,10 +4236,24 @@
+ 
+ 
+     local farmOrbTouchAt = 0
+-    -- WARP_BOSS_EVENT_ONLY: warp-collect only event/boss-related pickups
++    -- Event/boss loot window: opened by Shout (MANTIS / TREASURE / QUEEN / STAMPEDE / RAIN …)
++    local farmEventUntil = 0
++    local farmLastCollectIds = {}
++    local farmRejectUntil = {} -- oid -> clock when blacklist expires
++    local farmBadLootUntil = {} -- part -> skip until
++    local farmLootChaseStart, farmLootChaseDist, farmLootChaseBest = 0, math.huge, nil
++    local farmUnstuckAt, farmLastPos, farmLastPosAt = 0, nil, 0
++    -- Gain (server→client): confirms power/loot reward; pairs with OrbTaken after successful Collect
++    local farmGainCount = 0
++    local farmLastGainAt = 0
++    local farmPendingCollectAt = 0
++    -- WARP_BOSS_EVENT_ONLY keywords + common event/chest names from live Shout logs
+     local FARM_LOOT_KEYWORDS = {
+         "event", "boss", "queen", "raid", "worldboss", "world boss",
+         "limited", "special event", "boss drop", "boss orb",
++        "treasure", "chest", "reward", "gift", "crate", "loot",
++        "stampede", "golden", "orchid", "mantis", "powerup", "magnet",
++        "x2", "mega bite", "frenzy",
+     }
+     local function farmIsLootName(name)
+         local n = string.lower(tostring(name or ""))
+@@ -4224,37 +4262,116 @@
+         end
+         return false
+     end
+-    -- Warp-collect: hop ONLY to event/boss-related loot then touch
++    local function farmOidOf(obj)
++        if not obj then return nil end
++        local oid = obj:GetAttribute("Id") or obj:GetAttribute("OrbId")
++        if type(oid) ~= "number" and obj.Parent then
++            oid = obj.Parent:GetAttribute("Id") or obj.Parent:GetAttribute("OrbId")
++        end
++        return type(oid) == "number" and oid or nil
++    end
++    local function farmLootReachable(obj, root)
++        if not obj or not root then return false end
++        local pos = obj.Position
++        -- skip items buried deep under terrain / stuck in rock geometry
++        local gy = monsterGroundY(pos, { LocalPlayer.Character })
++        if pos.Y < gy - 10 then return false end
++        if pos.Y > gy + 45 then return false end
++        return true
++    end
++    -- Soft unstuck when horizontal progress stalls (rocks / collisions)
++    local function farmTryUnstuck(root, character, now)
++        if not root then return end
++        local pos = root.Position
++        if not farmLastPos then
++            farmLastPos, farmLastPosAt = pos, now
++            return
++        end
++        local moved = (Vector3.new(pos.X, 0, pos.Z) - Vector3.new(farmLastPos.X, 0, farmLastPos.Z)).Magnitude
++        if moved > 3.5 then
++            farmLastPos, farmLastPosAt = pos, now
++            return
++        end
++        if now - farmLastPosAt < 2.2 or now < farmUnstuckAt then return end
++        farmUnstuckAt = now + 2.8
++        farmLastPos, farmLastPosAt = pos, now
++        local side = Vector3.new((math.random() - 0.5) * 2, 0, (math.random() - 0.5) * 2)
++        if side.Magnitude < 1e-3 then side = Vector3.new(1, 0, 0) end
++        side = side.Unit * 14
++        local dest = pos + side + Vector3.new(0, 10, 0)
++        pcall(function()
++            ResourceManager:RecordWrite("MonsterWarp", "Position")
++            root.AssemblyLinearVelocity = Vector3.zero
++            root.CFrame = CFrame.new(dest)
++            if character then
++                for _, part in ipairs(character:GetDescendants()) do
++                    if part:IsA("BasePart") then part.CanCollide = false end
++                end
++            end
++        end)
++        monsterNoticeText = "ถอดติดหิน (unstuck hop)"
++        monsterNoticeUntil = now + 2.5
++    end
++    -- Warp-collect: event/boss loot + (during event window) any orb with Id; skip reject/unreachable
+     local function farmWarpCollectLoot()
+         local character = LocalPlayer.Character
+         if not character then return end
+         local root = character:FindFirstChild("HumanoidRootPart") or character.PrimaryPart
+         if not root then return end
+         local now = os.clock()
++        farmTryUnstuck(root, character, now)
+         if farmOrbTouchAt > 0 and now - farmOrbTouchAt < 0.28 then return end
+-        local best, bestDist = nil, 90
++        local eventActive = now < farmEventUntil
++        local best, bestDist = nil, eventActive and 120 or 90
+         for _, obj in ipairs(workspace:GetDescendants()) do
+             if obj:IsA("BasePart") and obj.Parent and obj.Parent ~= character then
+-                local label = obj.Name .. " " .. (obj.Parent and obj.Parent.Name or "")
+-                if farmIsLootName(label) then
+-                    local d = (obj.Position - root.Position).Magnitude
+-                    if d < bestDist and d > 0.5 then
+-                        best, bestDist = obj, d
++                if farmBadLootUntil[obj] and farmBadLootUntil[obj] > now then
++                    -- skip unreachable / rejected target
++                else
++                    local label = obj.Name .. " " .. (obj.Parent and obj.Parent.Name or "")
++                    local oid = farmOidOf(obj)
++                    local rejected = oid and farmRejectUntil[oid] and farmRejectUntil[oid] > now
++                    local nameHit = farmIsLootName(label)
++                    local eventOrb = eventActive and oid ~= nil
++                    if not rejected and (nameHit or eventOrb) and farmLootReachable(obj, root) then
++                        local d = (obj.Position - root.Position).Magnitude
++                        if d < bestDist and d > 0.5 then
++                            best, bestDist = obj, d
++                        end
+                     end
+                 end
+             end
+         end
+-        if not best then return end
+-        -- soft hop toward loot (anti-kick clamp)
++        if not best then
++            farmLootChaseStart, farmLootChaseDist = 0, math.huge
++            return
++        end
++        -- abandon loot that never gets closer (stuck in geometry)
++        if farmLootChaseStart == 0 or best ~= farmLootChaseBest then
++            farmLootChaseStart, farmLootChaseDist, farmLootChaseBest = now, bestDist, best
++        elseif bestDist + 0.8 < farmLootChaseDist then
++            farmLootChaseDist = bestDist
++            farmLootChaseStart = now
++        elseif now - farmLootChaseStart > 4.5 then
++            farmBadLootUntil[best] = now + 45
++            local oid = farmOidOf(best)
++            if oid then farmRejectUntil[oid] = now + 45 end
++            farmLootChaseStart, farmLootChaseDist, farmLootChaseBest = 0, math.huge, nil
++            monsterNoticeText = "ข้ามของเข้าไม่ได้"
++            monsterNoticeUntil = now + 3
++            return
++        end
++        -- soft hop toward loot (anti-kick clamp); lift slightly to clear rocks
+         local from = root.Position
+         local delta = best.Position - from
+         local hop = math.min(delta.Magnitude, MONSTER_WARP_MAX_HOP)
+         if hop > 1.2 and delta.Magnitude > 1e-4 then
+             local dest = from + delta.Unit * hop
++            dest = Vector3.new(dest.X, math.max(dest.Y, from.Y + 1.5), dest.Z)
+             pcall(function()
+                 ResourceManager:RecordWrite("MonsterWarp", "Position")
+                 root.AssemblyLinearVelocity = Vector3.zero
+                 root.CFrame = CFrame.new(dest)
+             end)
+         end
+-        -- touch / collect
++        -- touch / collect via AntRemotes.Collect when Id is known
+         pcall(function()
+             ResourceManager:RecordWrite("MonsterWarp", "Touch")
+             firetouchinterest(root, best, 0)
+             firetouchinterest(root, best, 1)
+         end)
++        local oid = farmOidOf(best)
++        if type(oid) == "number" then
++            farmLastCollectIds = { oid }
++            farmPendingCollectAt = now
++            pcall(function()
++                local folder = ReplicatedStorage:FindFirstChild("AntRemotes")
++                local col = folder and folder:FindFirstChild("Collect")
++                if col then col:FireServer({ oid }) end
++            end)
++        end
+         farmOrbTouchAt = now
+     end
++
++    -- Listen Shout / CollectReject / Gain from AntRemotes
++    -- Gain = server confirms reward (after Collect success or combat); never FireServer
++    task.spawn(function()
++        local folder = ReplicatedStorage:FindFirstChild("AntRemotes")
++            or (function()
++                local ok, f = pcall(function() return ReplicatedStorage:WaitForChild("AntRemotes", 8) end)
++                return ok and f or nil
++            end)()
++        if not folder then return end
++        local shout = folder:FindFirstChild("Shout")
++        if shout and shout:IsA("RemoteEvent") then
++            trackConnection(shout.OnClientEvent:Connect(function(msg)
++                local s = string.lower(tostring(msg or ""))
++                local now = os.clock()
++                if string.find(s, "mantis", 1, true)
++                    or string.find(s, "appeared", 1, true)
++                    or string.find(s, "treasure", 1, true)
++                    or string.find(s, "chest", 1, true)
++                    or string.find(s, "stampede", 1, true)
++                    or string.find(s, "queen is fed", 1, true)
++                    or string.find(s, "rain", 1, true)
++                    or string.find(s, "golden", 1, true) then
++                    farmEventUntil = math.max(farmEventUntil, now + 95)
++                    monsterScanDirty = true
++                    monsterNextSelectAt = 0
++                    monsterNoticeText = "EVENT/BOSS: " .. string.sub(tostring(msg or ""), 1, 48)
++                    monsterNoticeUntil = now + 5
++                end
++            end))
++        end
++        local reject = folder:FindFirstChild("CollectReject")
++        if reject and reject:IsA("RemoteEvent") then
++            trackConnection(reject.OnClientEvent:Connect(function()
++                local now = os.clock()
++                for _, oid in ipairs(farmLastCollectIds) do
++                    farmRejectUntil[oid] = now + 60
++                end
++                if farmLootChaseBest then
++                    farmBadLootUntil[farmLootChaseBest] = now + 60
++                end
++                farmLastCollectIds = {}
++                farmPendingCollectAt = 0
++                farmLootChaseStart, farmLootChaseDist, farmLootChaseBest = 0, math.huge, nil
++            end))
++        end
++        -- Gain: successful reward. Clear reject blacklist for pending collect ids.
++        local gain = folder:FindFirstChild("Gain")
++        if gain and gain:IsA("RemoteEvent") then
++            trackConnection(gain.OnClientEvent:Connect(function(...)
++                local now = os.clock()
++                farmGainCount = farmGainCount + 1
++                farmLastGainAt = now
++                -- If we just fired Collect, treat Gain as success for those orb ids
++                if farmPendingCollectAt > 0 and (now - farmPendingCollectAt) <= 2.5 then
++                    for _, oid in ipairs(farmLastCollectIds) do
++                        farmRejectUntil[oid] = nil
++                    end
++                    if farmLootChaseBest then
++                        farmBadLootUntil[farmLootChaseBest] = nil
++                    end
++                    farmLastCollectIds = {}
++                    farmPendingCollectAt = 0
++                    farmLootChaseStart, farmLootChaseDist, farmLootChaseBest = 0, math.huge, nil
++                end
++                -- lightweight status pulse (does not spam long)
++                if monsterNoticeUntil < now then
++                    monsterNoticeText = "GAIN +" .. tostring(farmGainCount)
++                    monsterNoticeUntil = now + 1.2
++                end
++            end))
++        end
++    end)
+     task.spawn(function()
+         -- Fire skills whenever ready (cooldowns enforced inside skillFire*)
+         local nextBite, nextMove = 0, 0
