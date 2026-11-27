@@ -112,7 +112,8 @@ local close = makeButton("X", UDim2.fromOffset(268, 7), UDim2.fromOffset(30, 28)
         stop()
         gui:Destroy()
     end)
-local lock = makeButton("UNLOCK", UDim2.fromOffset(205, 42), UDim2.fromOffset(93, 27),
+local lock
+lock = makeButton("UNLOCK", UDim2.fromOffset(205, 42), UDim2.fromOffset(93, 27),
     Color3.fromRGB(90, 90, 90), function()
         locked = not locked
         lock.Text = locked and "LOCKED" or "UNLOCK"
