@@ -118,7 +118,8 @@ local lock = makeButton("UNLOCK", UDim2.fromOffset(205, 42), UDim2.fromOffset(93
         lock.Text = locked and "LOCKED" or "UNLOCK"
     end)
 
-local toggle = makeButton("BITE  OFF", UDim2.fromOffset(12, 42), UDim2.fromOffset(180, 45),
+local toggle
+toggle = makeButton("BITE  OFF", UDim2.fromOffset(12, 42), UDim2.fromOffset(180, 45),
     Color3.fromRGB(190, 55, 20), function()
         enabled = not enabled
         toggle.Text = enabled and "BITE  ON" or "BITE  OFF"
