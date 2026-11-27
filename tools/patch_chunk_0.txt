@@ -1,0 +1,84 @@
+--- a/main.lua
++++ b/main.lua
+@@ -3138,7 +3138,9 @@
+         "termite", "locust", "cicada", "cricket", "grasshopper", "dragonfly", "caterpillar",
+         "tarantula", "leech", "aphid", "firefly", "ladybug", "stinkbug",
+         -- คำที่มักใช้เรียกบอส
+-        "giant", "king", "queen", "elder", "alpha", "titan", "colossal", "overlord", "ancient", "apex", "mega"
++        "giant", "king", "queen", "elder", "alpha", "titan", "colossal", "overlord", "ancient", "apex", "mega",
++        -- บอสโลก Ant Evolution จาก Shout / ชื่อโมเดลจริง
++        "orchid", "anteater", "worldboss", "world boss", "raidboss"
+     }
+     -- NPC = ตัวละครที่ไม่ใช่ศัตรู (ร้านค้า/เควสต์/ผู้ช่วย ฯลฯ) → แยกเป็นกลุ่ม NPC เสมอ
+     local NPC_NAME_HINTS = {
+@@ -3613,8 +3615,23 @@
+         candidate.root = getMonsterRoot(model, humanoid, candidate.kind == "Monster")
+         return alive and candidate.root ~= nil
+     end
++    local function monsterIsBossCandidate(candidate)
++        if not candidate then return false end
++        if candidate.reason == "boss-hud" then return true end
++        local n = string.lower(tostring(candidate.name or ""))
++        return string.find(n, "mantis", 1, true) ~= nil
++            or string.find(n, "orchid", 1, true) ~= nil
++            or string.find(n, "anteater", 1, true) ~= nil
++            or string.find(n, "worldboss", 1, true) ~= nil
++            or string.find(n, "raid", 1, true) ~= nil
++            or (string.find(n, "giant", 1, true) ~= nil and string.find(n, "boss", 1, true) ~= nil)
++            or string.find(n, "boss", 1, true) ~= nil
++    end
++    -- Prefer world bosses within BOSS_PRIORITY_RANGE over nearer trash mobs.
++    local BOSS_PRIORITY_RANGE = 600
+     local function nearestMonster(origin, ignoreModel)
+         local best, bestDistance = nil, math.huge
++        local bestBoss, bestBossDistance = nil, math.huge
+         for _, candidate in ipairs(monsterCandidates) do
+             if candidate.model ~= ignoreModel and isMonsterAlive(candidate) then
+                 local distance = (candidate.root.Position - origin).Magnitude
+@@ -3622,7 +3639,14 @@
+                     best = candidate
+                     bestDistance = distance
+                 end
+-            end
++                if monsterIsBossCandidate(candidate) and distance <= BOSS_PRIORITY_RANGE and distance < bestBossDistance then
++                    bestBoss = candidate
++                    bestBossDistance = distance
++                end
++            end
++        end
++        if bestBoss then
++            return bestBoss
+         end
+         return best
+     end
+@@ -4212,10 +4236,24 @@
+ 
+ 
+     local farmOrbTouchAt = 0
+-    -- WARP_BOSS_EVENT_ONLY: warp-collect only event/boss-related pickups
++    -- Event/boss loot window: opened by Shout (MANTIS / TREASURE / QUEEN / STAMPEDE / RAIN …)
++    local farmEventUntil = 0
++    local farmLastCollectIds = {}
++    local farmRejectUntil = {} -- oid -> clock when blacklist expires
++    local farmBadLootUntil = {} -- part -> skip until
++    local farmLootChaseStart, farmLootChaseDist, farmLootChaseBest = 0, math.huge, nil
++    local farmUnstuckAt, farmLastPos, farmLastPosAt = 0, nil, 0
++    -- Gain (server→client): confirms power/loot reward; pairs with OrbTaken after successful Collect
++    local farmGainCount = 0
++    local farmLastGainAt = 0
++    local farmPendingCollectAt = 0
++    -- WARP_BOSS_EVENT_ONLY keywords + common event/chest names from live Shout logs
+     local FARM_LOOT_KEYWORDS = {
+         "event", "boss", "queen", "raid", "worldboss", "world boss",
+         "limited", "special event", "boss drop", "boss orb",
++        "treasure", "chest", "reward", "gift", "crate", "loot",
++        "stampede", "golden", "orchid", "mantis", "powerup", "magnet",
++        "x2", "mega bite", "frenzy",
+     }
+     local function farmIsLootName(name)
+         local n = string.lower(tostring(name or ""))
+@@ -4224,37 +4262,116 @@
+         end
+         return false
+     end
+-    -- Warp-collect: hop ONLY to even
