@@ -1,0 +1,6 @@
+-- See main.lua for integrated version. This is a reference extract of the Gain/event/unstuck farm block.
+-- Gain: server->client reward confirm; pairs Collect -> Gain -> OrbTaken.
+-- On Gain within 2.5s of Collect: clear farmRejectUntil for pending orb ids.
+-- On CollectReject: blacklist pending orbs 60s.
+-- Shout opens farmEventUntil 95s for event orb chase.
+-- Unstuck: hop + temporary no-collide when horizontal progress stalls.
