@@ -5,13 +5,15 @@
 -- The interval controls client-side call attempts; the existing skill cooldown remains intact.
 
 local ENV = (getgenv and getgenv()) or _G
-local API = ENV.TAYJAY_SKILL_HYBRID
-if type(API) ~= "table" and type(ENV.TJ) == "table" then
-    API = ENV.TJ.SkillHybrid
-end
-if type(API) ~= "table" or type(API.FireBite) ~= "function" then
-    warn("[NEWTJ BITE GUI] SkillHybrid.FireBite unavailable. Execute main.lua first.")
-    return
+local function resolveAPI()
+    local api = ENV.TAYJAY_SKILL_HYBRID
+    if type(api) ~= "table" and type(ENV.TJ) == "table" then
+        api = ENV.TJ.SkillHybrid
+    end
+    if type(api) == "table" and type(api.FireBite) == "function" then
+        return api
+    end
+    return nil
 end
 
 -- Replace this GUI instance only; leave all main-script UI and commands untouched.
@@ -178,12 +180,15 @@ connect(gui.Destroying, stop)
 
 task.spawn(function()
     while running and gui.Parent do
-        if enabled then
+        local API = resolveAPI()
+        if not API then
+            status.Text = "WAITING  |  execute main.lua first"
+        elseif enabled then
             local ok, result = pcall(API.FireBite)
             status.Text = ok and (result == false and "WAITING  |  API cooldown" or "BITE CALL SENT")
                 or "ERROR  |  check Delta console"
         else
-            status.Text = "READY  |  API cooldown remains active"
+            status.Text = "READY  |  API connected"
         end
         task.wait(interval)
     end
