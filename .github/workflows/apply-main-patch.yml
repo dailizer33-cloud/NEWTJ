@@ -1,0 +1,34 @@
+name: Apply main.lua patch
+on:
+  push:
+    paths:
+      - "tools/main.lua.patch"
+      - ".github/workflows/apply-main-patch.yml"
+  workflow_dispatch:
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply patch
+        run: |
+          set -e
+          if patch -p1 --dry-run < tools/main.lua.patch; then
+            patch -p1 < tools/main.lua.patch
+          else
+            echo "Patch already applied or conflict — skipping"
+            exit 0
+          fi
+      - name: Commit if changed
+        run: |
+          if git diff --quiet; then
+            echo "No changes"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add main.lua
+          git commit -m "Apply farm Gain/boss/event/unstuck patch to main.lua"
+          git push
