@@ -3138,7 +3138,9 @@ local okMonster, errMonster = pcall(function()
         "termite", "locust", "cicada", "cricket", "grasshopper", "dragonfly", "caterpillar",
         "tarantula", "leech", "aphid", "firefly", "ladybug", "stinkbug",
         -- คำที่มักใช้เรียกบอส
-        "giant", "king", "queen", "elder", "alpha", "titan", "colossal", "overlord", "ancient", "apex", "mega"
+        "giant", "king", "queen", "elder", "alpha", "titan", "colossal", "overlord", "ancient", "apex", "mega",
+        -- บอสโลก Ant Evolution จาก Shout / ชื่อโมเดลจริง
+        "orchid", "anteater", "worldboss", "world boss", "raidboss"
     }
     -- NPC = ตัวละครที่ไม่ใช่ศัตรู (ร้านค้า/เควสต์/ผู้ช่วย ฯลฯ) → แยกเป็นกลุ่ม NPC เสมอ
     local NPC_NAME_HINTS = {
