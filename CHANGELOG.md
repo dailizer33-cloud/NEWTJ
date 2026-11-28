@@ -30,3 +30,15 @@
 - Kept `warp_off` and `movement_owner_switch` restricted to WARP-owned targets.
 - Added static regression assertions for the WARP activation and unlock ownership contract.
 - Live Delta testing is still required for target handoff and StopAll behavior.
+
+
+## Phase 19.0 - Target lifecycle, movement queue, and safe-ground guards
+- Added source-aware TargetService Unlock(reason, expectedSource); WARP activation releases only a Death Note-owned target and WARP shutdown releases only a WARP-owned target.
+- Added TargetService Reset(reason) and invoked it on startup and before global Owner shutdown in STOP ALL.
+- Added a cancellable FIFO movement queue for transient PLAYER_WARP / MONSTER requests, with queue-generation invalidation during ForceClear.
+- WARP and Monster Warp enqueue requests when a movement transition or platform handoff is still settling; queued requests can be cancelled from their controls.
+- Added walkable-surface raycasts for player WARP hops, target approach, and one-shot Death Note warps. A destination without walkable ground is rejected.
+- Monster ground checks now fail closed when no walkable floor is found; far hops and loot hops no longer assume the current Y is safe.
+- Preserved the existing 0.25-second atk_cd, Rapid Bite interval, and Skill Hybrid Bite cooldown.
+- Added Phase 19 structural regression assertions to static-check.sh.
+- Structural checks and live Delta regression checks must pass before merging. Static checks do not replace runtime testing.
