@@ -44,3 +44,4 @@
 - Structural checks and live Delta regression checks must pass before merging. Static checks do not replace runtime testing.
 
 - Queue entry points now reject Enqueue/DrainQueue after STOP ALL begins, before ForceClear invalidates queued work.
+- WARP's WAIT indicator is stored on MovementController rather than a new main-chunk local, and is reset by ForceClear.
