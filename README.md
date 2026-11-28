@@ -3,13 +3,13 @@
 สคริปต์ Lua แบบ client (สไตล์ executor) ไฟล์เดียว: เมนู UI, Player ESP, MM2 Role ESP,
 Death Note / Monster Warp, Rapid Bite, FPS Booster, Server Hop ฯลฯ
 
-> สถานะ: **Phase 18.3** — GitHub `main.lua` เป็น Source of Truth
+> สถานะ: **Phase 19.0 (review branch)** — `main.lua` เป็น Source of Truth เมื่อผ่านการตรวจและรวมเข้า `main`
 
 ## โครงสร้าง
 
 | Path | คืออะไร |
 |---|---|
-| `main.lua` | ตัวสคริปต์หลัก (Phase 18.3) |
+| `main.lua` | ตัวสคริปต์หลัก (Phase 19.0) |
 | `original.txt` | snapshot ต้นฉบับก่อน Phase 16 |
 | `patches/` | patch ของแต่ละ phase (`.diff` ใช้ `git apply` ได้) |
 | `docs/` | บันทึกแต่ละ phase + checklist |
@@ -46,8 +46,7 @@ structural check
 
 ## ทดสอบจริง
 
-ดูรายละเอียด Phase 18.3 ใน `docs/PHASE18_3.md` (ESP ปิด/เปิดคู่กับ MM2, เปลี่ยน role, respawn, STOP ALL,
-รันซ้ำ 2 รอบ)
+ดูรายละเอียด Phase 19.0 ใน `docs/PHASE19.md` สำหรับ TargetService, movement queue, safe-ground checks และ regression tests
 
 ## License
 
@@ -56,4 +55,4 @@ structural check
 
 ## Source of Truth
 
-ตั้งแต่ Phase 18.3 เป็นต้นไป ให้ใช้ `main.lua` บน GitHub branch `main` เป็นไฟล์หลักในการอ่าน ตรวจสอบ และพัฒนาต่อ ไฟล์ใน Library ใช้เป็นแหล่งอ้างอิงย้อนหลังเท่านั้น เว้นแต่ผู้ใช้จะสั่งเปลี่ยนแหล่งต้นฉบับ
+ตั้งแต่ Phase 18.3 เป็นต้นไป ให้ใช้ `main.lua` เป็นไฟล์หลักในการอ่าน ตรวจสอบ และพัฒนาต่อ โดย branch ที่เปิด Pull Request ใช้สำหรับตรวจแก้ก่อนรวมเข้า `main` ไฟล์ใน Library ใช้เป็นแหล่งอ้างอิงย้อนหลังเท่านั้น เว้นแต่ผู้ใช้จะสั่งเปลี่ยนแหล่งต้นฉบับ
