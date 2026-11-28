@@ -920,6 +920,7 @@ function _tjMovementController:ForceClear(reason)
     if self.ActiveQueueItem then self.ActiveQueueItem.cancelled = true end
     self.ActiveQueueItem = nil
     self.QueueBusy = false
+    self.PendingPlayerWarp = false
     self.Owner = nil
     self.Transition = false
     self.ActiveSince = nil
@@ -2960,7 +2961,7 @@ local shadowThread = task.spawn(function()
         local character = LocalPlayer.Character
         local root = character and character:FindFirstChild("HumanoidRootPart")
         if returnHome ~= false then goHome(root) end
-        if _tjMovementController.PendingPlayerWarp and _tjMovementController then
+        if _tjMovementController.PendingPlayerWarp then
             _tjMovementController:CancelQueued("PLAYER_WARP", "WARP")
         end
         _tjMovementController.PendingPlayerWarp = false
