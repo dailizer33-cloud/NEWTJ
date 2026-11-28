@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# NEWTJ - structural checks (Phase 16 + 17 + 18.2 + 18.3).
+# NEWTJ - structural checks (Phase 16 + 17 + 18.4 + 19.0).
 # These are grep-level checks on source structure. They do NOT replace a runtime test.
 set -euo pipefail
 
@@ -90,6 +90,60 @@ owners_line="$(line_of "$stopall" 'ResourceManager:StopAllOwners("STOP_ALL")')"
 [ -n "$reset_line" ] && [ -n "$owners_line" ] && [ "$reset_line" -lt "$owners_line" ] \
   || fail 'STOP ALL must reset TargetService before global Owner shutdown'
 pass 'startup and STOP ALL clear persistent TargetService state before Owner shutdown'
+
+# ---------------------------------------------------------------- Phase 19.0: movement queue and safe-ground regression guards.
+grep -qF 'function _tjMovementController:Enqueue(owner, key, startFn)' "$FILE" \
+  || fail 'movement queue Enqueue missing'
+grep -qF 'function _tjMovementController:DrainQueue()' "$FILE" \
+  || fail 'movement queue DrainQueue missing'
+grep -qF 'function _tjMovementController:CancelQueued(owner, key)' "$FILE" \
+  || fail 'movement queue cancellation missing'
+grep -qF '_tjMovementController:Enqueue("PLAYER_WARP", "WARP"' "$FILE" \
+  || fail 'WARP does not enqueue transient movement requests'
+grep -qF '_tjMovementController:Enqueue("MONSTER", "MONSTER"' "$FILE" \
+  || fail 'Monster Warp does not enqueue transient movement requests'
+grep -qF 'self.QueueGeneration = self.QueueGeneration + 1' "$FILE" \
+  || fail 'movement queue generation is not invalidated on ForceClear'
+grep -qF '_tjMovementController.QueueGeneration = (tonumber(_tjMovementController.QueueGeneration) or 0) + 1' "$FILE" \
+  || fail 'startup does not invalidate retained movement callbacks'
+grep -qF 'table.clear(_tjMovementController.Queue)' "$FILE" \
+  || fail 'startup does not clear retained movement requests'
+grep -qF '_tjMovementController.ActiveQueueItem.cancelled = true' "$FILE" \
+  || fail 'startup does not cancel a retained active movement request'
+grep -qF '_tjMovementController.PendingPlayerWarp = false' "$FILE" \
+  || fail 'WARP pending indicator is not stored/reset on MovementController'
+if grep -qF 'local warpQueuePending' "$FILE"; then fail 'WARP pending indicator adds a main-chunk local'; fi
+queue_drain="$(sed -n '/function _tjMovementController:DrainQueue()/,/function _tjMovementController:Enqueue/p' "$FILE")"
+[ -n "$queue_drain" ] || fail 'movement queue drain section not found'
+has "$queue_drain" 'if _G.TAYJAY_STOPPED or self.QueueBusy' || fail 'queue drain does not refuse work after STOP ALL'
+has "$queue_drain" 'self.QueueBusy = true' || fail 'queue drain does not reserve a single active starter'
+has "$queue_drain" 'local generation = self.QueueGeneration' || fail 'queue drain generation snapshot missing'
+has "$queue_drain" 'if generation ~= self.QueueGeneration or _G.TAYJAY_STOPPED then' \
+  || fail 'queue drain does not abort after reset / STOP ALL'
+has "$queue_drain" 'if #self.Queue > 0 and self.PlatformOwner == "PLAYER_WARP"' \
+  || fail 'idle WARP platform cleanup before queue drain missing'
+has "$queue_drain" 'if #self.Queue > 0 and self.PlatformOwner == "MONSTER"' \
+  || fail 'idle Monster platform cleanup before queue drain missing'
+inactive_monster_stop="$(sed -n '/if not states.MonsterWarp and not monsterWarpWasOn then/,/return/p' "$FILE")"
+[ -n "$inactive_monster_stop" ] || fail 'inactive Monster stop branch missing'
+has "$inactive_monster_stop" 'destroyMonsterPlatform()' \
+  || fail 'inactive Monster stop releases ownership without destroying its stale platform'
+pass 'inactive Monster Warp stop destroys the retained safety platform'
+pass 'WARP and Monster Warp use one cancellable FIFO queue with stale-platform and reentrancy guards'
+
+grep -qF 'local function findWarpGround(position, ignoreList)' "$FILE" \
+  || fail 'WARP walkable-ground raycast missing'
+grep -qF 'hit and hit:IsA("Terrain")' "$FILE" \
+  || fail 'safe-ground raycast does not accept Terrain surfaces'
+grep -qF 'local function safeWarpCFrame(desired, ignoreList)' "$FILE" \
+  || fail 'safe WARP destination guard missing'
+grep -qF 'if not ground then' "$FILE" \
+  || fail 'safe-ground rejection branch missing'
+grep -qF 'if not gy then return false, "no-safe-ground" end' "$FILE" \
+  || fail 'Monster far-hop must reject missing ground'
+grep -qF 'local monsterGroundY' "$FILE" \
+  || fail 'Monster ground finder forward declaration missing'
+pass 'WARP and Monster Warp reject destinations without walkable ground'
 
 # ---------------------------------------------------------------- optional
 if command -v luau-analyze >/dev/null 2>&1; then
