@@ -104,6 +104,12 @@ grep -qF '_tjMovementController:Enqueue("MONSTER", "MONSTER"' "$FILE" \
   || fail 'Monster Warp does not enqueue transient movement requests'
 grep -qF 'self.QueueGeneration = self.QueueGeneration + 1' "$FILE" \
   || fail 'movement queue generation is not invalidated on ForceClear'
+grep -qF '_tjMovementController.QueueGeneration = (tonumber(_tjMovementController.QueueGeneration) or 0) + 1' "$FILE" \
+  || fail 'startup does not invalidate retained movement callbacks'
+grep -qF 'table.clear(_tjMovementController.Queue)' "$FILE" \
+  || fail 'startup does not clear retained movement requests'
+grep -qF '_tjMovementController.ActiveQueueItem.cancelled = true' "$FILE" \
+  || fail 'startup does not cancel a retained active movement request'
 grep -qF '_tjMovementController.PendingPlayerWarp = false' "$FILE" \
   || fail 'WARP pending indicator is not stored/reset on MovementController'
 if grep -qF 'local warpQueuePending' "$FILE"; then fail 'WARP pending indicator adds a main-chunk local'; fi
