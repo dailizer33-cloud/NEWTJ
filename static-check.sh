@@ -106,6 +106,7 @@ grep -qF 'self.QueueGeneration = self.QueueGeneration + 1' "$FILE" \
   || fail 'movement queue generation is not invalidated on ForceClear'
 queue_drain="$(sed -n '/function _tjMovementController:DrainQueue()/,/function _tjMovementController:Enqueue/p' "$FILE")"
 [ -n "$queue_drain" ] || fail 'movement queue drain section not found'
+has "$queue_drain" 'if _G.TAYJAY_STOPPED or self.QueueBusy' || fail 'queue drain does not refuse work after STOP ALL'
 has "$queue_drain" 'self.QueueBusy = true' || fail 'queue drain does not reserve a single active starter'
 has "$queue_drain" 'local generation = self.QueueGeneration' || fail 'queue drain generation snapshot missing'
 has "$queue_drain" 'if generation ~= self.QueueGeneration or _G.TAYJAY_STOPPED then' \
