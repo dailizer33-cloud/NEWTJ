@@ -20,6 +20,7 @@
 - Requests are FIFO, deduplicated by owner/key, and only start after Transition, Owner and Platform ownership are clear.
 - When the previous mode is already inactive but retained an idle safety platform, the queue drain first invokes that mode's cleanup handshake and removes the stale platform before starting the next request.
 - A queue generation invalidates pending work during ForceClear / STOP ALL.
+- Enqueue and DrainQueue immediately refuse work once STOP ALL sets the stopped guard; ForceClear then invalidates and removes all retained requests.
 - WARP and Monster Warp enqueue only retryable handoff failures (transition in progress or a previous platform still active).
 - A successful stop handshake still performs immediate owner handoff; the queue is a fallback for the settling window, not a replacement for the existing synchronous handoff.
 - WARP shows WAIT while queued. The WARP button cancels its queued request; pressing the active Monster/NPC mode again cancels the Monster request.
