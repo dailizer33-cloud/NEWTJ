@@ -104,7 +104,11 @@ grep -qF '_tjMovementController:Enqueue("MONSTER", "MONSTER"' "$FILE" \
   || fail 'Monster Warp does not enqueue transient movement requests'
 grep -qF 'self.QueueGeneration = self.QueueGeneration + 1' "$FILE" \
   || fail 'movement queue generation is not invalidated on ForceClear'
-pass 'WARP and Monster Warp use one cancellable movement queue'
+grep -qF 'if #self.Queue > 0 and self.PlatformOwner == "PLAYER_WARP"' "$FILE" \
+  || fail 'idle WARP platform cleanup before queue drain missing'
+grep -qF 'if #self.Queue > 0 and self.PlatformOwner == "MONSTER"' "$FILE" \
+  || fail 'idle Monster platform cleanup before queue drain missing'
+pass 'WARP and Monster Warp use one cancellable movement queue with stale-platform cleanup'
 
 grep -qF 'local function findWarpGround(position, ignoreList)' "$FILE" \
   || fail 'WARP walkable-ground raycast missing'
