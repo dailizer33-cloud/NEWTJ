@@ -19,6 +19,7 @@
 - MovementController now has Enqueue, DrainQueue and CancelQueued.
 - Requests are FIFO, deduplicated by owner/key, and only start after Transition, Owner and Platform ownership are clear.
 - When the previous mode is already inactive but retained an idle safety platform, the queue drain first invokes that mode's cleanup handshake and removes the stale platform before starting the next request.
+- Startup increments the queue generation, cancels any retained active item, clears stale queued closures, and resets the WARP WAIT indicator before the new UI is installed.
 - A queue generation invalidates pending work during ForceClear / STOP ALL.
 - The pending WARP UI state lives on MovementController and is cleared by ForceClear, avoiding another top-level local in the large main chunk.
 - Enqueue and DrainQueue immediately refuse work once STOP ALL sets the stopped guard; ForceClear then invalidates and removes all retained requests.
