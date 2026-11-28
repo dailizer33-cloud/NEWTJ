@@ -777,8 +777,29 @@ function _tjMovementController:CancelQueued(owner, key)
     return removed
 end
 function _tjMovementController:DrainQueue()
-    if self.QueueBusy or self.Transition or self.Owner ~= nil or self.PlatformOwner ~= nil then return false end
-    if self.Platform and self.Platform.Parent then return false end
+    if self.QueueBusy or self.Transition or self.Owner ~= nil then return false end
+    -- A stopped mode can intentionally keep its safety platform while idle.
+    -- If a different request is waiting, clear that stale platform synchronously first.
+    if #self.Queue > 0 and self.PlatformOwner == "PLAYER_WARP"
+        and not (states and (states.KillAura or states.DNWarp or states.AutoWarp)) then
+        pcall(function()
+            if type(_G.TAYJAY_WARP_STOP_NOW) == "function" then
+                _G.TAYJAY_WARP_STOP_NOW(true)
+            end
+        end)
+    elseif #self.Queue > 0 and self.PlatformOwner == "MONSTER"
+        and not (states and states.MonsterWarp) then
+        pcall(function()
+            if type(_G.TAYJAY_MONSTER_STOP) == "function" then
+                _G.TAYJAY_MONSTER_STOP()
+            end
+        end)
+    end
+    if self.PlatformOwner ~= nil then return false end
+    if self.Platform and self.Platform.Parent then
+        pcall(function() self.Platform:Destroy() end)
+        self.Platform = nil
+    end
     local item
     while #self.Queue > 0 do
         local candidate = table.remove(self.Queue, 1)
