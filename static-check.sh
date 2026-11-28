@@ -108,7 +108,11 @@ grep -qF 'if #self.Queue > 0 and self.PlatformOwner == "PLAYER_WARP"' "$FILE" \
   || fail 'idle WARP platform cleanup before queue drain missing'
 grep -qF 'if #self.Queue > 0 and self.PlatformOwner == "MONSTER"' "$FILE" \
   || fail 'idle Monster platform cleanup before queue drain missing'
-pass 'WARP and Monster Warp use one cancellable movement queue with stale-platform cleanup'
+grep -qF 'ReleasePlatform/Release may call DrainQueue again.' "$FILE" \
+  || fail 'queue drain reentrancy guard comment missing'
+grep -qF 'local generation = self.QueueGeneration' "$FILE" \
+  || fail 'queue drain generation snapshot missing'
+pass 'WARP and Monster Warp use one cancellable movement queue with stale-platform and reentrancy guards'
 
 grep -qF 'local function findWarpGround(position, ignoreList)' "$FILE" \
   || fail 'WARP walkable-ground raycast missing'
