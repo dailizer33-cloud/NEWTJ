@@ -3927,8 +3927,9 @@ local okMonster, errMonster = pcall(function()
         end
         return monsterPlatform
     end
+    local monsterGroundY
     local function placeMonsterPlatform(position)
-        local groundY = monsterGroundY(position, { LocalPlayer.Character, monsterCurrent and monsterCurrent.model })
+        local groundY = monsterGroundY and monsterGroundY(position, { LocalPlayer.Character, monsterCurrent and monsterCurrent.model })
         if not groundY then return false end
         local platform = ensureMonsterPlatform()
         if not platform then return false end
@@ -4016,7 +4017,7 @@ local okMonster, errMonster = pcall(function()
       Message = "idle",
       Revision = 0,
     }
-    local function monsterGroundY(position, ignoreList)
+    monsterGroundY = function(position, ignoreList)
       local origin = position + Vector3.new(0, 12, 0)
       local params = RaycastParams.new()
       params.FilterType = Enum.RaycastFilterType.Exclude
@@ -4738,8 +4739,9 @@ local okMonster, errMonster = pcall(function()
         -- Atomically take movement ownership. The previous WARP owner must return
         -- home, disconnect both physics writers and restore collision before this succeeds.
         setMonsterPanelStatus("👾 MONSTER WARP: SWITCHING", "กำลังหยุด WARP และคืนค่า Collision ก่อนเริ่ม...", 0, 1)
-        local movementReady, movementReason = _tjMovementController
-            and _tjMovementController:Acquire("MONSTER", function(previous)
+        local movementReady, movementReason = false, "movement controller unavailable"
+        if _tjMovementController then
+            movementReady, movementReason = _tjMovementController:Acquire("MONSTER", function(previous)
                 if previous == "PLAYER_WARP" or previous == "CONFLICT"
                     or states.KillAura or states.DNWarp or states.AutoWarp then
                     if type(_G.TAYJAY_WARP_STOP_NOW) ~= "function" then return false end
@@ -4747,6 +4749,7 @@ local okMonster, errMonster = pcall(function()
                 end
                 return true
             end)
+        end
         if not movementReady then
             monsterWarpStarting = false
             if movementReason == "movement transition in progress"
