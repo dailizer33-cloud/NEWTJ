@@ -45,3 +45,4 @@
 
 - Queue entry points now reject Enqueue/DrainQueue after STOP ALL begins, before ForceClear invalidates queued work.
 - WARP's WAIT indicator is stored on MovementController rather than a new main-chunk local, and is reset by ForceClear.
+- Startup invalidates the prior queue generation and clears retained closures/active items so an Execute-twice session cannot start stale callbacks.
