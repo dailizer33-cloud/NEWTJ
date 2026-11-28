@@ -118,6 +118,8 @@ pass 'WARP and Monster Warp use one cancellable FIFO queue with stale-platform a
 
 grep -qF 'local function findWarpGround(position, ignoreList)' "$FILE" \
   || fail 'WARP walkable-ground raycast missing'
+grep -qF 'hit and hit:IsA("Terrain")' "$FILE" \
+  || fail 'safe-ground raycast does not accept Terrain surfaces'
 grep -qF 'local function safeWarpCFrame(desired, ignoreList)' "$FILE" \
   || fail 'safe WARP destination guard missing'
 grep -qF 'if not ground then' "$FILE" \
