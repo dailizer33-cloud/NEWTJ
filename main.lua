@@ -777,7 +777,7 @@ function _tjMovementController:CancelQueued(owner, key)
     return removed
 end
 function _tjMovementController:DrainQueue()
-    if self.QueueBusy or self.Transition or self.Owner ~= nil or #self.Queue == 0 then return false end
+    if _G.TAYJAY_STOPPED or self.QueueBusy or self.Transition or self.Owner ~= nil or #self.Queue == 0 then return false end
     -- Reserve the drain before cleanup. ReleasePlatform/Release may call DrainQueue again; only one queued starter may run.
     local generation = self.QueueGeneration
     self.QueueBusy = true
@@ -844,6 +844,7 @@ function _tjMovementController:DrainQueue()
     return true
 end
 function _tjMovementController:Enqueue(owner, key, startFn)
+    if _G.TAYJAY_STOPPED then return false, "stopped" end
     if (owner ~= "PLAYER_WARP" and owner ~= "MONSTER") or type(startFn) ~= "function" then
         return false, "invalid queue request"
     end
