@@ -4349,7 +4349,11 @@ local okMonster, errMonster = pcall(function()
         if not states.MonsterWarp and not monsterWarpWasOn then
             if _tjMovementController then
                 _tjMovementController:ClearPositionLock("MONSTER")
-                _tjMovementController:ReleasePlatform("MONSTER")
+            end
+            -- Even an inactive mode can retain an idle safety platform.
+            -- Destroy the instance as well as releasing MovementController ownership.
+            destroyMonsterPlatform()
+            if _tjMovementController then
                 _tjMovementController:Release("MONSTER")
             end
             return
