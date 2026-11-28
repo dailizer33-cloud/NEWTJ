@@ -694,9 +694,17 @@ end
 _tjMovementController.Generation = tonumber(_tjMovementController.Generation) or 0
 _tjMovementController.Transition = false
 _tjMovementController.Queue = type(_tjMovementController.Queue) == "table" and _tjMovementController.Queue or {}
-_tjMovementController.QueueBusy = false
-_tjMovementController.QueueGeneration = tonumber(_tjMovementController.QueueGeneration) or 0
+-- Invalidate callbacks retained by a previous execution before installing the new UI.
+_tjMovementController.QueueGeneration = (tonumber(_tjMovementController.QueueGeneration) or 0) + 1
+for _, staleItem in ipairs(_tjMovementController.Queue) do
+    if staleItem then staleItem.cancelled = true end
+end
+table.clear(_tjMovementController.Queue)
+if _tjMovementController.ActiveQueueItem then
+    _tjMovementController.ActiveQueueItem.cancelled = true
+end
 _tjMovementController.ActiveQueueItem = nil
+_tjMovementController.QueueBusy = false
 _tjMovementController.PendingPlayerWarp = false
 _tjMovementController.PlatformOwner = _tjMovementController.PlatformOwner
 _tjMovementController.Platform = _tjMovementController.Platform
