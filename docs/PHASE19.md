@@ -18,6 +18,7 @@
 ### Movement queue
 - MovementController now has Enqueue, DrainQueue and CancelQueued.
 - Requests are FIFO, deduplicated by owner/key, and only start after Transition, Owner and Platform ownership are clear.
+- When the previous mode is already inactive but retained an idle safety platform, the queue drain first invokes that mode's cleanup handshake and removes the stale platform before starting the next request.
 - A queue generation invalidates pending work during ForceClear / STOP ALL.
 - WARP and Monster Warp enqueue only retryable handoff failures (transition in progress or a previous platform still active).
 - A successful stop handshake still performs immediate owner handoff; the queue is a fallback for the settling window, not a replacement for the existing synchronous handoff.
