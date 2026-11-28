@@ -42,3 +42,5 @@
 - Preserved the existing 0.25-second atk_cd, Rapid Bite interval, and Skill Hybrid Bite cooldown.
 - Added Phase 19 structural regression assertions to static-check.sh.
 - Structural checks and live Delta regression checks must pass before merging. Static checks do not replace runtime testing.
+
+- Queue entry points now reject Enqueue/DrainQueue after STOP ALL begins, before ForceClear invalidates queued work.
