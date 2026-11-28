@@ -59,3 +59,5 @@
 8. Re-execute after STOP ALL and verify the menu opens normally.
 
 Static checks are structural only. Passing them does not prove the script runs correctly in Delta or on live Roblox maps.
+
+- Fixed an inactive Monster stop path that previously released platform ownership without destroying the retained safety-platform instance; static regression now guards that branch.
