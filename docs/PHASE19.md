@@ -26,6 +26,7 @@
 
 ### Safe-ground checks
 - Player WARP uses a downward raycast to require a collidable surface with an upward-facing normal before a hop or target approach.
+- Both player and Monster ground checks explicitly accept Roblox Terrain as well as collidable BaseParts; water remains excluded.
 - One-shot Death Note WARP rejects a destination when no safe floor is found.
 - WARP's safety platform is placed relative to the detected floor, not blindly beneath the current Y coordinate.
 - Monster ground lookup now returns nil when no walkable floor is detected. Monster far hops, loot hops and platform placement fail closed in that case.
