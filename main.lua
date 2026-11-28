@@ -697,6 +697,7 @@ _tjMovementController.Queue = type(_tjMovementController.Queue) == "table" and _
 _tjMovementController.QueueBusy = false
 _tjMovementController.QueueGeneration = tonumber(_tjMovementController.QueueGeneration) or 0
 _tjMovementController.ActiveQueueItem = nil
+_tjMovementController.PendingPlayerWarp = false
 _tjMovementController.PlatformOwner = _tjMovementController.PlatformOwner
 _tjMovementController.Platform = _tjMovementController.Platform
 local function _tjInferMovementOwner()
@@ -2424,12 +2425,11 @@ task.spawn(function()
         end
     end
 end)
-local warpQueuePending = false
 local function updateKaBtnDisplay()
     local warpOn, walkOn = states.KillAura, states.NormalKillAura
-    kaCircleBtn.BackgroundColor3 = warpQueuePending and GREEN.warning or (warpOn and GREEN.on or GREEN.off)
+    kaCircleBtn.BackgroundColor3 = _tjMovementController.PendingPlayerWarp and GREEN.warning or (warpOn and GREEN.on or GREEN.off)
     kaNormalBtn.BackgroundColor3 = walkOn and GREEN.on or GREEN.off
-    local warpLabel = warpQueuePending and "WAIT" or (warpOn and "ON" or "OFF")
+    local warpLabel = _tjMovementController.PendingPlayerWarp and "WAIT" or (warpOn and "ON" or "OFF")
     kaCircleBtn.Text = '<font size="26">🕶</font>\n<font size="15">WARP</font>\n<font size="11">' .. warpLabel .. '</font>'
     kaNormalBtn.Text = '<font size="26">👹</font>\n<font size="15">WALK</font>\n<font size="11">' .. (walkOn and "ON" or "OFF") .. '</font>'
     if not (warpOn or states.DNWarp) then _G.TAYJAY_FOLLOW = nil end
@@ -2469,11 +2469,11 @@ do
         return true
     end
     trackConnection(kaCircleBtn.Activated:Connect(function()
-        if warpQueuePending then
+        if _tjMovementController.PendingPlayerWarp then
             local cancelled = _tjMovementController
                 and _tjMovementController:CancelQueued("PLAYER_WARP", "WARP")
             if cancelled then
-                warpQueuePending = false
+                _tjMovementController.PendingPlayerWarp = false
                 updateKaBtnDisplay()
                 targetTitle.Text = "WARP queue cancelled"
             end
@@ -2490,9 +2490,9 @@ do
         local started, reason = activatePlayerWarp()
         if started then return end
         if reason == "movement transition in progress" or reason == "previous movement platform is still active" then
-            warpQueuePending = true
+            _tjMovementController.PendingPlayerWarp = true
             local queued = _tjMovementController:Enqueue("PLAYER_WARP", "WARP", function()
-                warpQueuePending = false
+                _tjMovementController.PendingPlayerWarp = false
                 local ok = activatePlayerWarp()
                 updateKaBtnDisplay()
                 if not ok then targetTitle.Text = "⚠ WARP queue start failed" end
@@ -2502,7 +2502,7 @@ do
                 updateKaBtnDisplay()
                 targetTitle.Text = "⌛ WARP queued • waiting for movement owner"
             else
-                warpQueuePending = false
+                _tjMovementController.PendingPlayerWarp = false
                 updateKaBtnDisplay()
                 targetTitle.Text = "⚠ WARP queue unavailable"
             end
@@ -2960,10 +2960,10 @@ local shadowThread = task.spawn(function()
         local character = LocalPlayer.Character
         local root = character and character:FindFirstChild("HumanoidRootPart")
         if returnHome ~= false then goHome(root) end
-        if warpQueuePending and _tjMovementController then
+        if _tjMovementController.PendingPlayerWarp and _tjMovementController then
             _tjMovementController:CancelQueued("PLAYER_WARP", "WARP")
         end
-        warpQueuePending = false
+        _tjMovementController.PendingPlayerWarp = false
         warpHome, warpOwner, randomWarpTarget = nil, nil, nil
         warpRestUntil = 0
         warpWasOn = false
