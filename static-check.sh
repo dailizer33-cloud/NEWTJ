@@ -124,6 +124,11 @@ has "$queue_drain" 'if #self.Queue > 0 and self.PlatformOwner == "PLAYER_WARP"' 
   || fail 'idle WARP platform cleanup before queue drain missing'
 has "$queue_drain" 'if #self.Queue > 0 and self.PlatformOwner == "MONSTER"' \
   || fail 'idle Monster platform cleanup before queue drain missing'
+inactive_monster_stop="$(sed -n '/if not states.MonsterWarp and not monsterWarpWasOn then/,/return/p' "$FILE")"
+[ -n "$inactive_monster_stop" ] || fail 'inactive Monster stop branch missing'
+has "$inactive_monster_stop" 'destroyMonsterPlatform()' \
+  || fail 'inactive Monster stop releases ownership without destroying its stale platform'
+pass 'inactive Monster Warp stop destroys the retained safety platform'
 pass 'WARP and Monster Warp use one cancellable FIFO queue with stale-platform and reentrancy guards'
 
 grep -qF 'local function findWarpGround(position, ignoreList)' "$FILE" \
