@@ -104,15 +104,17 @@ grep -qF '_tjMovementController:Enqueue("MONSTER", "MONSTER"' "$FILE" \
   || fail 'Monster Warp does not enqueue transient movement requests'
 grep -qF 'self.QueueGeneration = self.QueueGeneration + 1' "$FILE" \
   || fail 'movement queue generation is not invalidated on ForceClear'
-grep -qF 'if #self.Queue > 0 and self.PlatformOwner == "PLAYER_WARP"' "$FILE" \
+queue_drain="$(sed -n '/function _tjMovementController:DrainQueue()/,/function _tjMovementController:Enqueue/p' "$FILE")"
+[ -n "$queue_drain" ] || fail 'movement queue drain section not found'
+has "$queue_drain" 'self.QueueBusy = true' || fail 'queue drain does not reserve a single active starter'
+has "$queue_drain" 'local generation = self.QueueGeneration' || fail 'queue drain generation snapshot missing'
+has "$queue_drain" 'if generation ~= self.QueueGeneration or _G.TAYJAY_STOPPED then' \
+  || fail 'queue drain does not abort after reset / STOP ALL'
+has "$queue_drain" 'if #self.Queue > 0 and self.PlatformOwner == "PLAYER_WARP"' \
   || fail 'idle WARP platform cleanup before queue drain missing'
-grep -qF 'if #self.Queue > 0 and self.PlatformOwner == "MONSTER"' "$FILE" \
+has "$queue_drain" 'if #self.Queue > 0 and self.PlatformOwner == "MONSTER"' \
   || fail 'idle Monster platform cleanup before queue drain missing'
-grep -qF 'ReleasePlatform/Release may call DrainQueue again.' "$FILE" \
-  || fail 'queue drain reentrancy guard comment missing'
-grep -qF 'local generation = self.QueueGeneration' "$FILE" \
-  || fail 'queue drain generation snapshot missing'
-pass 'WARP and Monster Warp use one cancellable movement queue with stale-platform and reentrancy guards'
+pass 'WARP and Monster Warp use one cancellable FIFO queue with stale-platform and reentrancy guards'
 
 grep -qF 'local function findWarpGround(position, ignoreList)' "$FILE" \
   || fail 'WARP walkable-ground raycast missing'
