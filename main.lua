@@ -777,7 +777,10 @@ function _tjMovementController:CancelQueued(owner, key)
     return removed
 end
 function _tjMovementController:DrainQueue()
-    if self.QueueBusy or self.Transition or self.Owner ~= nil then return false end
+    if self.QueueBusy or self.Transition or self.Owner ~= nil or #self.Queue == 0 then return false end
+    -- Reserve the drain before cleanup. ReleasePlatform/Release may call DrainQueue again.
+    local generation = self.QueueGeneration
+    self.QueueBusy = true
     -- A stopped mode can intentionally keep its safety platform while idle.
     -- If a different request is waiting, clear that stale platform synchronously first.
     if #self.Queue > 0 and self.PlatformOwner == "PLAYER_WARP"
@@ -795,7 +798,14 @@ function _tjMovementController:DrainQueue()
             end
         end)
     end
-    if self.PlatformOwner ~= nil then return false end
+    if generation ~= self.QueueGeneration or _G.TAYJAY_STOPPED then
+        self.QueueBusy = false
+        return false
+    end
+    if self.PlatformOwner ~= nil then
+        self.QueueBusy = false
+        return false
+    end
     if self.Platform and self.Platform.Parent then
         pcall(function() self.Platform:Destroy() end)
         self.Platform = nil
@@ -808,10 +818,11 @@ function _tjMovementController:DrainQueue()
             break
         end
     end
-    if not item then return false end
-    self.QueueBusy = true
+    if not item then
+        self.QueueBusy = false
+        return false
+    end
     self.ActiveQueueItem = item
-    local generation = self.QueueGeneration
     task.spawn(function()
         task.wait()
         local ok, started = false, false
