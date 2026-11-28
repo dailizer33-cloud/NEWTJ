@@ -2727,8 +2727,11 @@ local function findWarpGround(position, ignoreList)
         params
     )
     if not result or result.Normal.Y < 0.55 then return nil end
-    local canCollide = false
-    pcall(function() canCollide = result.Instance.CanCollide end)
+    local hit = result.Instance
+    local canCollide = hit and hit:IsA("Terrain")
+    if not canCollide and hit and hit:IsA("BasePart") then
+        canCollide = hit.CanCollide == true
+    end
     if not canCollide then return nil end
     return result
 end
@@ -4057,8 +4060,11 @@ local okMonster, errMonster = pcall(function()
       params.IgnoreWater = true
       local result = workspace:Raycast(origin, Vector3.new(0, -160, 0), params)
       if result and result.Normal.Y >= 0.55 then
-         local canCollide = false
-         pcall(function() canCollide = result.Instance.CanCollide end)
+         local hit = result.Instance
+         local canCollide = hit and hit:IsA("Terrain")
+         if not canCollide and hit and hit:IsA("BasePart") then
+            canCollide = hit.CanCollide == true
+         end
          if canCollide then return result.Position.Y + MONSTER_GROUND_OFFSET end
       end
       return nil
