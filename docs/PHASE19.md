@@ -43,10 +43,13 @@
 - No requested attack timing was changed.
 
 ## Verification status
-- Source-level preflight assertions passed before the branch update.
-- `static-check.sh` was extended with Phase 19 assertions.
-- GitHub Actions validation is pending; this workflow currently runs for pull requests targeting `main`.
-- No Delta runtime test has been performed in this environment.
+- Current PR head at the time of this update: `f874764b0408957d1ef282c53f64a77b1596a1d3`.
+- GitHub Actions NEWTJ Validation Gate run #133: PASS (source integrity, structural validation, architecture boundary smoke checks, artifact guard, baseline report).
+- CodeQL Advanced: PASS on the current PR head.
+- Microsoft Defender for DevOps: running at the last status check.
+- Microsoft C++ Code Analysis: failed at Configure CMake because this Lua/Luau repository has no CMake project; this is not a Luau parser or analyzer result.
+- No Luau analyzer is installed in the runner.
+- No live Delta runtime test has been performed in this environment.
 
 ## Delta regression checklist
 1. Execute the script twice; confirm stale TargetService target and combat owner do not survive re-execution.
