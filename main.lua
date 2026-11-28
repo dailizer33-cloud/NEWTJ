@@ -778,7 +778,7 @@ function _tjMovementController:CancelQueued(owner, key)
 end
 function _tjMovementController:DrainQueue()
     if self.QueueBusy or self.Transition or self.Owner ~= nil or #self.Queue == 0 then return false end
-    -- Reserve the drain before cleanup. ReleasePlatform/Release may call DrainQueue again.
+    -- Reserve the drain before cleanup. ReleasePlatform/Release may call DrainQueue again; only one queued starter may run.
     local generation = self.QueueGeneration
     self.QueueBusy = true
     -- A stopped mode can intentionally keep its safety platform while idle.
