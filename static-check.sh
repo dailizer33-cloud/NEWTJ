@@ -104,6 +104,9 @@ grep -qF '_tjMovementController:Enqueue("MONSTER", "MONSTER"' "$FILE" \
   || fail 'Monster Warp does not enqueue transient movement requests'
 grep -qF 'self.QueueGeneration = self.QueueGeneration + 1' "$FILE" \
   || fail 'movement queue generation is not invalidated on ForceClear'
+grep -qF '_tjMovementController.PendingPlayerWarp = false' "$FILE" \
+  || fail 'WARP pending indicator is not stored/reset on MovementController'
+if grep -qF 'local warpQueuePending' "$FILE"; then fail 'WARP pending indicator adds a main-chunk local'; fi
 queue_drain="$(sed -n '/function _tjMovementController:DrainQueue()/,/function _tjMovementController:Enqueue/p' "$FILE")"
 [ -n "$queue_drain" ] || fail 'movement queue drain section not found'
 has "$queue_drain" 'if _G.TAYJAY_STOPPED or self.QueueBusy' || fail 'queue drain does not refuse work after STOP ALL'
